@@ -2,7 +2,6 @@
 """
 Created on Tue Sep  4 20:58:38 2018
 
-@author: Saurabh
 """
 
 import pandas as pd
@@ -27,3 +26,20 @@ def fit_garch_model(ts=implied_vol["impl_volatility"], p=1, q=1):
     model_result = garch_model.fit()
     # params = model_result.params
     return(model_result)
+
+def kernel_smoothing():
+    ''' Place holder for Nathan's Kernel smoothing to extract the smooth part
+    from Variance time series'''
+    
+def empirical_smoothing():
+    ''''Place holder for Salman to add Empirical Smoothing Function based on 
+    230E Slides'''
+    
+def backtesting_algo():
+    '''Place holder for Amrit to add Backtesting Function. Could be split into 
+    other functions. Should take in 
+    a. Price time series 
+    b. Signal Timeseries.
+    <Modify as per requirement>
+     
+    '''
