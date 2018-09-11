@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 '''
-Expected to have sections which make functiin calls
+Expected to have sections which make function calls
 '''
 
 ''' Imports '''
 
-import pandas as pd
-import numpy as np
+from helpers import *
+
+''' Options '''
+pd.set_option("display.max_columns", 20)
 #%%
 ###############################################################################
 ## A. Read data and clean
