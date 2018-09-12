@@ -21,7 +21,8 @@ spx_data_df = pd.read_excel('../Data/Data_Dump_BBG.xlsx',
                             sheet_name='SPX Index', skiprows=4)
 options_implied_vol_df = options_implied_vol_data_clean(options_implied_vol_df)
 options_implied_vol_df = combine_data(options_implied_vol_df, spx_data_df)
-
+fridays_list = list(options_implied_vol_df.resample('W-Fri',
+                                                    on='date')['date'].last())
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining

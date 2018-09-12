@@ -89,8 +89,8 @@ def calc_imp_vol(premium, option_params):
     
     sigma_guess = 0.15
     eps = np.finfo(float).eps
-    # Constraint sigma to be in (eps, 1)
-    bounds = ((eps, 2.),)
+    # Constraint sigma to be in (eps, 3)
+    bounds = ((eps, 3.),)
     opt_res = minimize(fun=option_loss,
                        x0=sigma_guess,
                        args=(option_params, premium),
@@ -117,8 +117,14 @@ def options_implied_vol_data_clean(data_df):
                                            format='%Y%m%d')
     # Adjust the strike price because it's multiplied by 1000
     data_df['strike_price'] = data_df['strike_price']/1000
+    # Convert implied vol to decimals from %
+    data_df['impl_volatility'] = data_df['impl_volatility']/100
+    # Engineer new helper columns
     data_df['mid_price'] = (data_df['best_bid'] + data_df['best_offer'])/2
     data_df['T'] = (data_df['exdate'] - data_df['date']).dt.days
+    # Drop redundant columns
+    redundant_columns = ['exdate']
+    data_df.drop(redundant_columns, inplace=True, axis=1)
     return data_df
 
 def combine_data(options_data_df, stock_data_df):
@@ -135,6 +141,90 @@ def combine_data(options_data_df, stock_data_df):
                                             how='inner')
     return options_data_df
 
+def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
+                      long_only=False, direction=None):
+    '''
+    Selects the best option to trade on the basis of the forecasted implied
+    volatility and the direction of stock price move. Provides the PnL after
+    exactly 7 days of holding the option.
+    Inputs Types:
+        1) date: pandas._libs.tslibs.timestamps.Timestamp
+        2) forecast_imp_vol: float
+        3) data_df: pandas.core.frame.DataFrame
+        4) look_ahead: int (forecast window)
+        5) long_only: bool
+        6) direction: int (+/- 1)
+    '''
+    if direction is not None:
+        assert direction in [-1, 1], 'Stock direction can only be +/- 1'
+        option_type = 'C' if direction == 1 else 'P'
+    date_fwd = date + pd.Timedelta(days=look_ahead)
+    count = 1
+    if np.logical_not(any(data_df['date'] == date_fwd)):
+        date_fwd = date + pd.Timedelta(days=look_ahead+count)
+        count += 1
+    flter_ind = (data_df['date'] == date) | (data_df['date'] == date_fwd)
+    if long_only:
+        flter_ind = flter_ind & (data_df['cp_flag'] == option_type)
+    best_options_df = data_df[flter_ind]
+    # Remove non-liquid options
+    best_options_df = best_options_df[best_options_df['n_days_lt'] == 0]
+    id_groupby = best_options_df.groupby(['optionid'])
+    liquid_options_list = id_groupby['impl_volatility'].count() == 2
+    liquid_options_list = list(liquid_options_list.index[liquid_options_list])
+    liquid_filter_ind = best_options_df['optionid'].isin(liquid_options_list)
+    best_options_df = best_options_df[liquid_filter_ind]    
+    # Calculate PnL of executing trade on the best option
+    output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
+    if best_options_df.shape[0] != 0:        
+        cur_date_df = best_options_df[best_options_df['date'] == date]
+        fwd_date_df = best_options_df[best_options_df['date'] == date_fwd]
+        cur_date_df['abs_vol_diff'] = np.abs(cur_date_df['impl_volatility']
+                                             - forecast_imp_vol)
+        cur_date_df = cur_date_df.sort_values(by='abs_vol_diff',
+                                              ascending=False)
+        trade_option_id = cur_date_df['optionid'].iloc[0]
+        # Price current best option
+        S = cur_date_df['S'].iloc[0]
+        K = cur_date_df['strike_price'].iloc[0]
+        r = cur_date_df['r'].iloc[0]
+        y = cur_date_df['y'].iloc[0]
+        T = cur_date_df['T'].iloc[0]/365
+        sigma_impl = cur_date_df['impl_volatility'].iloc[0]
+        call_flag = cur_date_df['cp_flag'].iloc[0] == 'C'
+        cur_price = black_scholes_pricer(S, K, r, y, T, sigma_impl, call_flag)
+        # Extract parameters of the option for remaining days
+        # Implement continuous delta-hedge strategy: To Do
+        # Price best option 7 days ahead
+        fwd_option_ind = fwd_date_df['optionid'] == trade_option_id
+        fwd_date_df = fwd_date_df[fwd_option_ind]
+        S_fwd = fwd_date_df['S'].iloc[0]
+        r_fwd = fwd_date_df['r'].iloc[0]
+        y_fwd = fwd_date_df['y'].iloc[0]
+        T_fwd = fwd_date_df['T'].iloc[0]/365
+        sigma_impl_fwd = fwd_date_df['impl_volatility'].iloc[0]
+        fwd_price = black_scholes_pricer(S_fwd, K, r_fwd, y_fwd, T_fwd,
+                                         sigma_impl_fwd, call_flag)
+        pnl = fwd_price - cur_price
+        vol_diff = sigma_impl - forecast_imp_vol
+        # Implement directional strategy
+        if direction is not None:
+            if np.logical_not(long_only):            
+                # Sell Direction and best option is call
+                if (direction == -1) & call_flag:
+                    pnl = -pnl
+                # Buy Direction and best option is put
+                elif (direction == 1) & np.logical_not(call_flag):
+                    pnl = -pnl
+        # Implement vol strategy            
+        else:
+            # Short overpriced options
+            if vol_diff > 0:
+                pnl = -pnl
+        
+        output_dict['PnL'] = pnl
+        
+    return output_dict
 #%%
 ###############################################################################
 ## Scrapers
