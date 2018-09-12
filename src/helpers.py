@@ -121,6 +121,20 @@ def options_implied_vol_data_clean(data_df):
     data_df['T'] = (data_df['exdate'] - data_df['date']).dt.days
     return data_df
 
+def combine_data(options_data_df, stock_data_df):
+    '''
+    Extracts the stock price and dividend yield for the underlying stock.
+    Combines with the options' data.
+    '''
+    #stock_data_df = spx_data_df.copy()
+    stock_columns = ['Dates', 'IDX_EST_DVD_YLD', 'PX_LAST']
+    stock_data_df = stock_data_df[stock_columns]
+    stock_data_df.rename(columns={'Dates':'date', 'IDX_EST_DVD_YLD': 'y',
+                                  'PX_LAST': 'S'}, inplace=True)
+    options_data_df = options_data_df.merge(stock_data_df, on='date',
+                                            how='inner')
+    return options_data_df
+
 #%%
 ###############################################################################
 ## Scrapers
