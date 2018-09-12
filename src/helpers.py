@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from arch import arch_model
 from scipy.stats import norm
+from scipy.optimize import minimize
 import os
 import matplotlib.pyplot as plt
 #from pytrends.request import TrendReq
@@ -71,6 +72,54 @@ def convert_prob_forecast_vol(forecast_prob, r, thresh=0.1, delta_t=7/365):
         return float('inf')
     else:
         return np.abs(numerator)/denominator
+    
+def calc_imp_vol(premium, option_params):
+    '''
+    Calculates the BS implied volatility given an option's premium and
+    underlying parameters. Assumes that the highest value of value can be
+    200%
+    '''
+    def option_loss(sigma, option_params, premium):
+        S, K, r, y, T, call_flag = option_params
+        bs_price = black_scholes_pricer(S, K, r, y, T, sigma, call_flag)
+        #loss = (premium - bs_price)**2*1E6
+        loss = (premium - bs_price)**2
+        #print('Sigma:', sigma, 'Loss:', loss)
+        return loss
+    
+    sigma_guess = 0.15
+    eps = np.finfo(float).eps
+    # Constraint sigma to be in (eps, 1)
+    bounds = ((eps, 2.),)
+    opt_res = minimize(fun=option_loss,
+                       x0=sigma_guess,
+                       args=(option_params, premium),
+                       #method='SLSQP',
+                       bounds=bounds,
+                       #options={'maxiter':int(1E3), 'disp':True}
+                       options={'maxiter':int(1E3)}
+                      )
+    sigma_imp = opt_res.x[0]
+    return sigma_imp
+
+def options_implied_vol_data_clean(data_df):
+    '''
+    Clean the options' implied vol data
+    '''
+    columns_to_keep = ['date', 'exdate', 'last_date', 'cp_flag',
+                       'strike_price', 'best_bid', 'best_offer',
+                       'impl_volatility', 'delta', 'optionid']
+    data_df = data_df[columns_to_keep]
+    # Convert date columns to pandas datetime
+    datetype_columns = ['date', 'exdate', 'last_date']
+    for date_col in datetype_columns:
+        data_df[date_col] = pd.to_datetime(data_df[date_col], yearfirst=True,
+                                           format='%Y%m%d')
+    # Adjust the strike price because it's multiplied by 1000
+    data_df['strike_price'] = data_df['strike_price']/1000
+    data_df['mid_price'] = (data_df['best_bid'] + data_df['best_offer'])/2
+    data_df['T'] = (data_df['exdate'] - data_df['date']).dt.days
+    return data_df
 
 #%%
 ###############################################################################
