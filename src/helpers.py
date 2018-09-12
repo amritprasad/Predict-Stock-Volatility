@@ -9,6 +9,9 @@ import numpy as np
 from arch import arch_model
 from scipy.stats import norm
 import os
+import matplotlib.pyplot as plt
+#from pytrends.request import TrendReq
+#%%
 
 # Change the below to local directory
 os.chdir("C:\\Users\\Saurabh\\Documents\\Python Scripts\\Fall\\230T\\Project")
@@ -70,3 +73,43 @@ def convert_prob_forecast_vol(forecast_prob, r, thresh=0.1, delta_t=7/365):
         return np.abs(numerator)/denominator
 
 #%%
+###############################################################################
+## Scrapers
+###############################################################################        
+        
+def google_trends(keyword_list=["Blockchain"],cat= 0,
+                  time_frame ="2008-01-01 2017-12-01",
+                  gprop = "",make_plot=True):
+    '''
+    Downloads Time serries data for the keywords.Make sure you have the library:
+    pip install pytrends
+    
+    examples: https://mancap314.github.io/googletrends-py.html
+    
+    Parameters:
+    keyword list: Give combination for google search combination
+    time_frame: Give in "yyyy-mm-dd yyyy-mm-dd"  fixed for now.
+    cat: 1138 for business and finance for more: 
+    https://github.com/pat310/google-trends-api/wiki/Google-Trends-Categories
+    gprop: can be 'images', 'news', 'youtube' or 'froogle'
+    make_plot: Set False to mute the popping graphs.
+    
+    Returns: Returns a Data Frame
+    Example:
+    test_df = google_trends(keyword_list= ["Bulls","Bears"],
+                        gprop = "news")
+    
+    '''
+    from pytrends.request import TrendReq        
+    pytrends = TrendReq(hl='en-US',tz=360)
+    #kw_list = ["Blockchain"]
+    pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe=time_frame,
+                           geo='', gprop='')
+    df=pytrends.interest_over_time()
+    if make_plot ==False:
+        print("Your Download looks like:")
+        df.plot.line()
+    else: 
+        print("Download for ",keyword_list, "completed")
+    return(df)
+
