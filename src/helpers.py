@@ -49,16 +49,21 @@ def backtesting_algo():
     <Modify as per requirement>     
     '''
     
-def black_scholes_pricer(S, K, r, y, T, sigma, call_flag=False):
+def black_scholes_pricer(S, K, r, y, T, sigma, call_flag=False,
+                         delta_flag=False):
     '''
-    Black-Scholes pricer of a European Option
+    Black-Scholes pricer of a European Option. Will return delta also in case
+    delta_flag is True
     '''
     phi = 1 if call_flag else -1
     x_p = (np.log(S/K) + (r-y)*T)/(sigma*np.sqrt(T)) + sigma*np.sqrt(T)/2
     x_m = x_p - sigma*np.sqrt(T)
     N_x_p = norm.cdf(phi*x_p, loc=0, scale=1)
     N_x_m = norm.cdf(phi*x_m, loc=0, scale=1)
-    return phi*(S*np.exp(-y*T)*N_x_p - K*np.exp(-r*T)*N_x_m)
+    out = phi*(S*np.exp(-y*T)*N_x_p - K*np.exp(-r*T)*N_x_m)
+    if delta_flag:
+        out = phi*np.exp(-y*T)*N_x_p
+    return out
 
 def convert_prob_forecast_vol(forecast_prob, r, thresh=0.1, delta_t=7/365):
     '''
@@ -178,49 +183,36 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
     if best_options_df.shape[0] != 0:        
         cur_date_df = best_options_df[best_options_df['date'] == date]
-        fwd_date_df = best_options_df[best_options_df['date'] == date_fwd]
         cur_date_df['abs_vol_diff'] = np.abs(cur_date_df['impl_volatility']
                                              - forecast_imp_vol)
         cur_date_df = cur_date_df.sort_values(by='abs_vol_diff',
                                               ascending=False)
         trade_option_id = cur_date_df['optionid'].iloc[0]
-        # Price current best option
-        S = cur_date_df['S'].iloc[0]
+        # Extract parameters of the option for all days
         K = cur_date_df['strike_price'].iloc[0]
-        r = cur_date_df['r'].iloc[0]
-        y = cur_date_df['y'].iloc[0]
-        T = cur_date_df['T'].iloc[0]/365
-        sigma_impl = cur_date_df['impl_volatility'].iloc[0]
         call_flag = cur_date_df['cp_flag'].iloc[0] == 'C'
-        cur_price = black_scholes_pricer(S, K, r, y, T, sigma_impl, call_flag)
-        # Extract parameters of the option for remaining days
-        # Implement continuous delta-hedge strategy: To Do
-        # Price best option 7 days ahead
-        fwd_option_ind = fwd_date_df['optionid'] == trade_option_id
-        fwd_date_df = fwd_date_df[fwd_option_ind]
-        S_fwd = fwd_date_df['S'].iloc[0]
-        r_fwd = fwd_date_df['r'].iloc[0]
-        y_fwd = fwd_date_df['y'].iloc[0]
-        T_fwd = fwd_date_df['T'].iloc[0]/365
-        sigma_impl_fwd = fwd_date_df['impl_volatility'].iloc[0]
-        fwd_price = black_scholes_pricer(S_fwd, K, r_fwd, y_fwd, T_fwd,
-                                         sigma_impl_fwd, call_flag)
-        pnl = fwd_price - cur_price
-        vol_diff = sigma_impl - forecast_imp_vol
-        # Implement directional strategy
-        if direction is not None:
-            if np.logical_not(long_only):            
-                # Sell Direction and best option is call
-                if (direction == -1) & call_flag:
-                    pnl = -pnl
-                # Buy Direction and best option is put
-                elif (direction == 1) & np.logical_not(call_flag):
-                    pnl = -pnl
-        # Implement vol strategy            
-        else:
-            # Short overpriced options
-            if vol_diff > 0:
-                pnl = -pnl
+        strategy_filter_ind = (data_df['date'] >= date) & (data_df['date'] <= date_fwd)
+        strategy_filter_ind = strategy_filter_ind & (data_df['optionid'] == trade_option_id)
+        S_arr = data_df['S'][strategy_filter_ind].ffill()
+        r_arr = data_df['r'][strategy_filter_ind].ffill()
+        y_arr = data_df['y'][strategy_filter_ind].ffill()
+        T_arr = data_df['T'][strategy_filter_ind].ffill()/365
+        sigma_impl_arr = data_df['impl_volatility'][strategy_filter_ind].ffill()
+        bs_pricer = np.vectorize(black_scholes_pricer)
+        option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag)
+        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag, True))
+        # Implement continuous delta-hedge strategy
+        vol_diff = sigma_impl_arr.iloc[0] - forecast_imp_vol
+        phi = 1 if call_flag else -1
+        account = option_price_arr[0] - delta_arr[0]*S_arr.iloc[0]*phi        
+        for idx in range(1, len(option_price_arr)-1):
+            turnover_pnl = phi*(delta_arr[idx-1] - delta_arr[idx])*S_arr.iloc[idx]
+            #print(turnover_pnl)
+            account += turnover_pnl
+        account -= option_price_arr[len(option_price_arr)-1]
+        account += phi*delta_arr[-2]*S_arr.iloc[-1]        
+        # Short options' strategy if vol diff > 0
+        pnl = account if vol_diff > 0 else -account
         
         output_dict['PnL'] = pnl
         
