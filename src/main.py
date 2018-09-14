@@ -68,3 +68,30 @@ spx_data.to_csv("./Results/SPX_data_with_fitted_vol.csv")
 ## C. Feature Creation
 ## c. NLP Data Feature Creation
 ###############################################
+
+###############################################################################
+## Z. APPENDIX
+## I. Trends Scraping
+###############################################################################
+positive_words = ["gainer","whistleblower","speedy","dubious","scraps",
+                  "acknowledge","delisted","downs","boding","disappeared",
+                  "botched","kongs","surely","resurgent","eos","hindered",
+                  "leapt","grapple","heated","forthcoming","standpoint",
+                  "exacerbated","steer","toptier","braking","jackets",
+                  "featured","overcrowded","saddled","haul"
+                  ]
+
+negative_words = ["dating","birthrate","reacting","lofty","accelerators",
+                  "falsified","bust","averaging","pages","championed",
+                  "folded","trillions","santa","fourfold","wellknown",
+                  "perfect","defaults","bottleneck","cloudy",
+                  "strains","kicks","doubted","halving","retailing","abandon",
+                  "depressing","specifications","businessmen","diluting"
+                  ]
+
+scrape_these_words(key_words =positive_words ,path = "../data",
+                       file_name = "positive_words_2000.csv")
+
+scrape_these_words(key_words =negative_words ,path = "../data",
+                       file_name = "negative_words_2000.csv")
+   

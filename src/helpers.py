@@ -226,7 +226,7 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
 ###############################################################################        
         
 def google_trends(keyword_list=["Blockchain"],cat= 0,
-                  time_frame ="2008-01-01 2017-12-01",
+                  time_frame ="2000-01-01 2017-12-01",
                   gprop = "",make_plot=True):
     '''
     Downloads Time serries data for the keywords.Make sure you have the library:
@@ -261,3 +261,36 @@ def google_trends(keyword_list=["Blockchain"],cat= 0,
         print("Download for ",keyword_list, "completed")
     return(df)
 
+
+def scrape_these_words(key_words = ["bears","bulls"],path = "../data",
+                       file_name = "positive_words.csv"):
+    
+    file_path = path + "/" + file_name 
+    if os.path.isfile(file_path):
+        print("File Found in path. Reading it to append")
+        this_df = pd.read_csv(file_path)
+        this_df["date"] = pd.to_datetime(this_df["date"])
+        this_df.set_index("date",inplace = True)
+        existing_words = list(this_df.columns)
+        count = 1
+    else: 
+        print("Creating new file and df")
+        count = 0
+        existing_words = []
+        
+    for this_word in key_words:
+        if this_word in existing_words:
+            print("Word: ",this_word," already exists")
+            continue
+        
+        #this_word = key_words[1]
+        temp_df= google_trends([this_word])
+        if(count == 0):
+            this_df = temp_df[[this_word]]
+            count = count +1
+        else: 
+            this_df = pd.merge(this_df,temp_df[[this_word]],left_index=True,
+                               right_index=True,how = "outer")
+    this_df.to_csv(file_path)
+            
+     
