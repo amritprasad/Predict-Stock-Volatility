@@ -11,6 +11,8 @@ from scipy.stats import norm
 from scipy.optimize import minimize
 import os
 import matplotlib.pyplot as plt
+from arch.univariate import GARCH,ARX
+from arch import arch_model
 #from pytrends.request import TrendReq
 #%%
 
@@ -25,7 +27,8 @@ implied_vol = pd.read_csv(".//data//implied_vol.csv")
 
 
 def fit_garch_model(ts=implied_vol["impl_volatility"], p=1, q=1):
-    ''' Takes in the time series returns the parameters. Default params are p=1
+    ''' Takes in the time series returns
+    returns the parameters. Default params are p=1
     and q=1 '''
     garch_model = arch_model(y=ts, mean="Constant",
                              p=1, q=1)

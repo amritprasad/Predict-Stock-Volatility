@@ -27,6 +27,10 @@ fridays_list = list(options_implied_vol_df.resample('W-Fri',
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
+smoothed_sp = pd.read_csv("../../data/snp_with_rv_bv.csv")
+## Column names: ['Dates', 'Price', 'weekday', 'Return', 'Return(-1)', 
+## 'Return(-2)','Return(-3)', 'Return(-4)', 'mu', 'RV', 'BV', 'k']
+fitted_result = fit_garch_model(ts= smoothed_sp["Return"].dropna())
 
 #%%
 ###############################################################################
