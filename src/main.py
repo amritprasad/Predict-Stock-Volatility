@@ -23,15 +23,26 @@ options_implied_vol_df = options_implied_vol_data_clean(options_implied_vol_df)
 options_implied_vol_df = combine_data(options_implied_vol_df, spx_data_df)
 fridays_list = list(options_implied_vol_df.resample('W-Fri',
                                                     on='date')['date'].last())
+spx_data = pd.read_csv("../data/spx_data.csv")
+spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
+spx_data["Returns"] = spx_data["SPX"].pct_change()
+spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
+
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-smoothed_sp = pd.read_csv("../../data/snp_with_rv_bv.csv")
-## Column names: ['Dates', 'Price', 'weekday', 'Return', 'Return(-1)', 
-## 'Return(-2)','Return(-3)', 'Return(-4)', 'mu', 'RV', 'BV', 'k']
-fitted_result = fit_garch_model(ts= smoothed_sp["Return"].dropna())
 
+fitted_result = fit_garch_model(ts= spx_data["Returns"] .dropna())
+fitted_vol = fitted_result.conditional_volatility
+spx_data["Fitted Vol"] = np.nan
+spx_data["Fitted Vol"][1:] = fitted_vol
+plt.plot(spx_data["Dates"],spx_data["Std Dev"],label = "Realized Volatilty")
+plt.plot(spx_data["Dates"],spx_data["Fitted Vol"],
+         label = "GARCH (benchmark)")
+plt.legend()
+plt.title("Realized vs GARCH")
+plt.savefig("./Results/Fitted_Realized_Vol.jpg")
 #%%
 ###############################################################################
 ## C. Feature Creation
