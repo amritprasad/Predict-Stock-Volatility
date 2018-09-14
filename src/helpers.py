@@ -16,17 +16,7 @@ from arch import arch_model
 #from pytrends.request import TrendReq
 #%%
 
-# Change the below to local directory
-os.chdir("C:\\Users\\Saurabh\\Documents\\Python Scripts\\Fall\\230T\\Project")
-
-implied_vol = pd.read_csv(".//data//implied_vol.csv")
-
-# garch_model = arch_model(y=implied_vol["impl_volatility"],
-#                         mean="Constant", p=1, q=1)
-# model_result = garch_model.fit()
-
-
-def fit_garch_model(ts=implied_vol["impl_volatility"], p=1, q=1):
+def fit_garch_model(ts, p=1, q=1):
     ''' Takes in the time series returns
     returns the parameters. Default params are p=1
     and q=1 '''
@@ -203,7 +193,8 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         sigma_impl_arr = data_df['impl_volatility'][strategy_filter_ind].ffill()
         bs_pricer = np.vectorize(black_scholes_pricer)
         option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag)
-        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag, True))
+        #delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag, True))
+        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, forecast_imp_vol, call_flag, True))
         # Implement continuous delta-hedge strategy
         vol_diff = sigma_impl_arr.iloc[0] - forecast_imp_vol
         phi = 1 if call_flag else -1
