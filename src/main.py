@@ -27,6 +27,7 @@ spx_data = pd.read_csv("../data/spx_data.csv")
 spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
 spx_data["Returns"] = spx_data["SPX"].pct_change()
 spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
+
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
@@ -43,6 +44,7 @@ plt.legend()
 plt.grid()
 plt.title("Realized vs GARCH")
 plt.savefig("./Results/Fitted_Realized_Vol.jpg")
+spx_data.to_csv("./Results/SPX_data_with_fitted_vol.csv")
 #%%
 ###############################################################################
 ## C. Feature Creation
