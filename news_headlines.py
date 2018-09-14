@@ -12,16 +12,16 @@ import time
 from datetime import datetime, timedelta
 import json
 
-start_date = "2018-09-12"
-end_date = "2018-08-31"
+start_date = "2017-01-01"
+end_date = "2017-12-31"
 filename = "Data from " + start_date + " to " + end_date + ".txt"
-curr_date = datetime.strptime(start_date, "%Y-%m-%d")
+curr_date = datetime.strptime(end_date, "%Y-%m-%d")
 data_dict = {}
 num_days_done = 0
 
-while curr_date > datetime.strptime(end_date, "%Y-%m-%d"):
+while curr_date > datetime.strptime(start_date, "%Y-%m-%d"):
     if not num_days_done % 10:
-        print(num_days_done, " days done")
+        print(num_days_done+1, " days done")
 
     date_str = datetime.strftime(curr_date, "%Y-%m-%d")
     site = "http://www.wsj.com/public/page/archive-" + date_str + ".html"
@@ -48,3 +48,4 @@ while curr_date > datetime.strptime(end_date, "%Y-%m-%d"):
 
 with open(filename, 'w') as file:
     file.write(json.dumps(data_dict))
+#%%
