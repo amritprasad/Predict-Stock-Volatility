@@ -21,19 +21,21 @@ spx_data_df = pd.read_excel('../Data/Data_Dump_BBG.xlsx',
                             sheet_name='SPX Index', skiprows=4)
 options_implied_vol_df = options_implied_vol_data_clean(options_implied_vol_df)
 options_implied_vol_df = combine_data(options_implied_vol_df, spx_data_df)
-fridays_list = list(options_implied_vol_df.resample('W-Fri',
-                                                    on='date')['date'].last())
+#fridays_list = list(options_implied_vol_df.resample('W-Fri',
+#                                                    on='date')['date'].last())
 spx_data = spx_data_df[['Dates', 'PX_LAST']]
+spx_data['PX_LAST'].fillna(method='ffill', inplace=True)
 spx_data.rename(columns={'PX_LAST':'SPX'}, inplace=True)
 spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
 spx_data["Returns"] = spx_data["SPX"].pct_change()
+spx_data.dropna(inplace=True)
 spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
 
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-returns_series = spx_data["Returns"].dropna().values
+returns_series = spx_data["Returns"].values
 num_points = returns_series.size
 train_idx = int(num_points*0.6)
 cv_idx = int(num_points*0.85)
@@ -42,14 +44,17 @@ X_cv = returns_series[train_idx:cv_idx]
 X_test = returns_series[cv_idx:]
 dates = spx_data["Dates"][1:cv_idx]
 
-fitted_result = fit_garch_model(ts=np.append(X_train, X_cv))
+# Scale values by a factor to ensure GARCH optimizer doesn't fail
+scale_factor = 100
+fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
 # Forecast 1 week ahead volatility on the cv set
 forecast_vol = fitted_result.forecast(horizon=5, start=train_idx,
                                       align='target').variance
 forecast_vol.dropna(inplace=True)
-forecast_vol = np.sqrt(forecast_vol['h.5'].values)
+#forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
+forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
 # Drop the 1st value since it's NaN
-fitted_vol = fitted_result.conditional_volatility[1:]
+fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
 
 # Plot Benchmark against Realized Vol for entire series
 plt.plot(dates, spx_data["Std Dev"][1:cv_idx], label = "Realized Volatilty")
@@ -75,6 +80,9 @@ plt.savefig("./Results/Forecasted_Realized_Vol.jpg")
 # Calculate Benchmark Values on the CV set
 garch_cv_mse = np.mean((y_cv_true - forecast_vol)**2)
 print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
+
+# Calculate the forecast df
+forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
 #%%
 ###############################################################################
 ## C. Feature Creation

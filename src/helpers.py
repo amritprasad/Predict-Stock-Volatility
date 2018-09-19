@@ -11,8 +11,9 @@ from scipy.stats import norm
 from scipy.optimize import minimize
 import os
 import matplotlib.pyplot as plt
-from arch.univariate import GARCH,ARX
-from arch import arch_model
+#from arch.univariate import GARCH,ARX
+import bisect
+import time
 #from pytrends.request import TrendReq
 #%%
 
@@ -22,7 +23,7 @@ def fit_garch_model(ts, p=1, q=1):
     and q=1 '''
     garch_model = arch_model(y=ts, mean="HAR", lags=[1], vol="garch",
                              p=p, q=q)
-    #garch_model = arch_model(y=ts, vol='Garch', p=p, o=0, q=q, dist='Normal')
+    #garch_model = arch_model(y=ts, vol='garch', p=p, o=0, q=q)
     model_result = garch_model.fit()
     # params = model_result.params
     return(model_result)
@@ -148,12 +149,13 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     exactly 7 days of holding the option.
     Inputs Types:
         1) date: pandas._libs.tslibs.timestamps.Timestamp
-        2) forecast_imp_vol: float
+        2) forecast_imp_vol: float (assumed to be daily vol)
         3) data_df: pandas.core.frame.DataFrame
         4) look_ahead: int (forecast window)
         5) long_only: bool
         6) direction: int (+/- 1)
     '''
+    #date, forecast_imp_vol, data_df, look_ahead, long_only, direction = options_implied_vol_df['date'][34], 0.25, options_implied_vol_df.copy(), 7, False, None
     if direction is not None:
         assert direction in [-1, 1], 'Stock direction can only be +/- 1'
         option_type = 'C' if direction == 1 else 'P'
@@ -172,7 +174,21 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     liquid_options_list = id_groupby['impl_volatility'].count() == 2
     liquid_options_list = list(liquid_options_list.index[liquid_options_list])
     liquid_filter_ind = best_options_df['optionid'].isin(liquid_options_list)
-    best_options_df = best_options_df[liquid_filter_ind]    
+    best_options_df = best_options_df[liquid_filter_ind]
+    # Choose options with smallest time to maturity >= look_ahead. Vol scaling
+    # approximation would work best that way
+    time_maturity = sorted(best_options_df.loc[best_options_df['date']==date,
+                                               'T'].unique())
+    best_T = bisect.bisect_left(time_maturity, look_ahead)
+    best_T = time_maturity[best_T]
+    time_filter_ind = (best_options_df['date'] == date)
+    time_filter_ind = time_filter_ind & (best_options_df['T'] == best_T)
+    valid_option_ids = best_options_df.loc[time_filter_ind, 'optionid']
+    valid_option_ids = np.unique(valid_option_ids)
+    time_filter_ind = best_options_df['optionid'].isin(valid_option_ids)
+    best_options_df = best_options_df[time_filter_ind]
+    # Scale daily forecast vol by the appropriate number
+    forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
     # Calculate PnL of executing trade on the best option
     output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
     if best_options_df.shape[0] != 0:        
@@ -193,9 +209,10 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         T_arr = data_df['T'][strategy_filter_ind].ffill()/365
         sigma_impl_arr = data_df['impl_volatility'][strategy_filter_ind].ffill()
         bs_pricer = np.vectorize(black_scholes_pricer)
-        option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag)
-        #delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag, True))
-        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, forecast_imp_vol, call_flag, True))
+        option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr,
+                                     sigma_impl_arr, call_flag)
+        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr,
+                                     sigma_impl_arr, call_flag, True))
         # Implement continuous delta-hedge strategy
         vol_diff = sigma_impl_arr.iloc[0] - forecast_imp_vol
         phi = 1 if call_flag else -1
@@ -212,6 +229,41 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         output_dict['PnL'] = pnl
         
     return output_dict
+
+def backtester(model_df, plot_title, look_ahead=7):
+    '''
+    Calculates the total PnL and graphs the performance of the forecasts.
+    Inputs-
+        1) model_df: DataFrame - Columns = ['Forecast_Vol'], Index = 'Dates'
+    '''
+    #model_df, plot_title = forecast_df.copy(), 'GARCH Back Test'
+    pnl_series = [np.nan]*model_df.shape[0]
+    dates = np.array(model_df.index.get_level_values(0))
+    forecast_vol_arr = model_df['Forecast_Vol'].values
+    start = time.time()
+    for count in range(model_df.shape[0]):
+        cur_date = dates[count]
+        forecast_vol = forecast_vol_arr[count]
+        pnl = trade_best_option(cur_date, forecast_vol,
+                                options_implied_vol_df, look_ahead=look_ahead,
+                                long_only=False, direction=None)['PnL']
+        pnl_series[count] = pnl
+        if count % 100 == 0:
+            print('Processed', dates[count])
+    end = time.time()
+    print('Total Time taken is', end-start)
+    model_df['PnL'] = pnl_series
+    model_df['Cum_PnL'] = model_df['PnL'].fillna(0).cumsum()
+    # Plot the cumulative PnL of the strategy
+    plt.plot(model_df.index, model_df['Cum_PnL'])
+    plt.xticks(rotation=90.)
+    plt.grid(True)
+    plt.xlabel('Dates')
+    plt.ylabel('Cumulative PnL($)')
+    plt.title(plot_title)
+    plt.savefig('./Results/' + plot_title + '.jpg')
+    
+    return model_df
 #%%
 ###############################################################################
 ## Scrapers
