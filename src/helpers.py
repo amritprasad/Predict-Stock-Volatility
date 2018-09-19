@@ -20,8 +20,9 @@ def fit_garch_model(ts, p=1, q=1):
     ''' Takes in the time series returns
     returns the parameters. Default params are p=1
     and q=1 '''
-    garch_model = arch_model(y=ts, mean="Constant",
-                             p=1, q=1)
+    garch_model = arch_model(y=ts, mean="HAR", lags=[1], vol="garch",
+                             p=p, q=q)
+    #garch_model = arch_model(y=ts, vol='Garch', p=p, o=0, q=q, dist='Normal')
     model_result = garch_model.fit()
     # params = model_result.params
     return(model_result)
