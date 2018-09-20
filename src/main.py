@@ -19,8 +19,15 @@ pd.set_option("display.max_columns", 20)
 options_implied_vol_df = pd.read_csv("../Data/Options_Implied_Vol.csv")
 spx_data_df = pd.read_excel('../Data/Data_Dump_BBG.xlsx',
                             sheet_name='SPX Index', skiprows=4)
+price_history_df = pd.read_excel('../Data/Data_Dump_BBG.xlsx',
+                                 sheet_name='Price History', skiprows=3)
+price_history_df.drop(index=[0,1], inplace=True)
+price_history_df.rename(columns={price_history_df.columns[0]: 'Dates'},
+                                 inplace=True)
+price_history_df['Dates'] = pd.to_datetime(price_history_df['Dates'])
+bbg_data_df = pd.merge(spx_data_df, price_history_df, on='Dates', how='outer')
 options_implied_vol_df = options_implied_vol_data_clean(options_implied_vol_df)
-options_implied_vol_df = combine_data(options_implied_vol_df, spx_data_df)
+options_implied_vol_df = combine_data(options_implied_vol_df, bbg_data_df)
 #fridays_list = list(options_implied_vol_df.resample('W-Fri',
 #                                                    on='date')['date'].last())
 spx_data = spx_data_df[['Dates', 'PX_LAST']]
@@ -83,6 +90,9 @@ print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
 
 # Calculate the forecast df
 forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
+#%%
+# Backtest the benchmark
+backtester(forecast_df, options_implied_vol_df, 'GARCH Back Test', 7)
 #%%
 ###############################################################################
 ## C. Feature Creation

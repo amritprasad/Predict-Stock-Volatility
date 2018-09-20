@@ -25,7 +25,7 @@ def fit_garch_model(ts, p=1, q=1):
                              p=p, q=q)
     #garch_model = arch_model(y=ts, vol='garch', p=p, o=0, q=q)
     model_result = garch_model.fit()
-    # params = model_result.params
+    #params = model_result.params
     return(model_result)
 
 def kernel_smoothing():
@@ -117,13 +117,12 @@ def options_implied_vol_data_clean(data_df):
                                            format='%Y%m%d')
     # Adjust the strike price because it's multiplied by 1000
     data_df['strike_price'] = data_df['strike_price']/1000
-    # Convert implied vol to decimals from %
-    data_df['impl_volatility'] = data_df['impl_volatility']/100
     # Engineer new helper columns
     data_df['mid_price'] = (data_df['best_bid'] + data_df['best_offer'])/2
     data_df['T'] = (data_df['exdate'] - data_df['date']).dt.days
+    data_df['n_days_lt'] = (data_df['date'] - data_df['last_date']).dt.days
     # Drop redundant columns
-    redundant_columns = ['exdate']
+    redundant_columns = ['exdate', 'last_date']
     data_df.drop(redundant_columns, inplace=True, axis=1)
     return data_df
 
@@ -132,11 +131,16 @@ def combine_data(options_data_df, stock_data_df):
     Extracts the stock price and dividend yield for the underlying stock.
     Combines with the options' data.
     '''
-    #stock_data_df = spx_data_df.copy()
-    stock_columns = ['Dates', 'IDX_EST_DVD_YLD', 'PX_LAST']
+    #options_data_df, stock_data_df = options_implied_vol_df.copy(), bbg_data_df.copy()
+    stock_columns = ['Dates', 'IDX_EST_DVD_YLD', 'PX_LAST',
+                     'USSOC CMPN Curncy']
     stock_data_df = stock_data_df[stock_columns]
-    stock_data_df.rename(columns={'Dates':'date', 'IDX_EST_DVD_YLD': 'y',
-                                  'PX_LAST': 'S'}, inplace=True)
+    stock_data_df.rename(columns={'Dates':'date', 'IDX_EST_DVD_YLD':'y',
+                                  'PX_LAST':'S', 'USSOC CMPN Curncy':'r'},
+                         inplace=True)
+    # Convert columns to decimals
+    stock_data_df['r'] = stock_data_df['r']/100
+    stock_data_df['y'] = stock_data_df['y']/100
     options_data_df = options_data_df.merge(stock_data_df, on='date',
                                             how='inner')
     return options_data_df
@@ -230,11 +234,12 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         
     return output_dict
 
-def backtester(model_df, plot_title, look_ahead=7):
+def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7):
     '''
     Calculates the total PnL and graphs the performance of the forecasts.
     Inputs-
         1) model_df: DataFrame - Columns = ['Forecast_Vol'], Index = 'Dates'
+        2) options_implied_vol_df: DataFrame
     '''
     #model_df, plot_title = forecast_df.copy(), 'GARCH Back Test'
     pnl_series = [np.nan]*model_df.shape[0]
