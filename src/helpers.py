@@ -168,6 +168,7 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     if np.logical_not(any(data_df['date'] == date_fwd)):
         date_fwd = date + pd.Timedelta(days=look_ahead+count)
         count += 1
+    output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
     flter_ind = (data_df['date'] == date) | (data_df['date'] == date_fwd)
     if long_only:
         flter_ind = flter_ind & (data_df['cp_flag'] == option_type)
@@ -184,17 +185,18 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     time_maturity = sorted(best_options_df.loc[best_options_df['date']==date,
                                                'T'].unique())
     best_T = bisect.bisect_left(time_maturity, look_ahead)
+    if len(time_maturity) == 0:
+        return output_dict
     best_T = time_maturity[best_T]
+    # Scale daily forecast vol by the appropriate number
+    forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
     time_filter_ind = (best_options_df['date'] == date)
     time_filter_ind = time_filter_ind & (best_options_df['T'] == best_T)
     valid_option_ids = best_options_df.loc[time_filter_ind, 'optionid']
     valid_option_ids = np.unique(valid_option_ids)
     time_filter_ind = best_options_df['optionid'].isin(valid_option_ids)
     best_options_df = best_options_df[time_filter_ind]
-    # Scale daily forecast vol by the appropriate number
-    forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
     # Calculate PnL of executing trade on the best option
-    output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
     if best_options_df.shape[0] != 0:        
         cur_date_df = best_options_df[best_options_df['date'] == date]
         cur_date_df['abs_vol_diff'] = np.abs(cur_date_df['impl_volatility']
@@ -254,7 +256,7 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7):
                                 long_only=False, direction=None)['PnL']
         pnl_series[count] = pnl
         if count % 100 == 0:
-            print('Processed', dates[count])
+            print('\nProcessed', dates[count])
     end = time.time()
     print('Total Time taken is', end-start)
     model_df['PnL'] = pnl_series
@@ -266,7 +268,7 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7):
     plt.xlabel('Dates')
     plt.ylabel('Cumulative PnL($)')
     plt.title(plot_title)
-    plt.savefig('./Results/' + plot_title + '.jpg')
+    plt.savefig('../Results/' + plot_title + '.jpg')
     
     return model_df
 #%%
