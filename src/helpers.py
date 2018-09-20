@@ -141,12 +141,15 @@ def combine_data(options_data_df, stock_data_df):
     # Convert columns to decimals
     stock_data_df['r'] = stock_data_df['r']/100
     stock_data_df['y'] = stock_data_df['y']/100
+    # Forward fill prices
+    stock_data_df.fillna(method='ffill', inplace=True)
     options_data_df = options_data_df.merge(stock_data_df, on='date',
                                             how='inner')
     return options_data_df
 
 def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
-                      long_only=False, direction=None):
+                      long_only=False, direction=None, multiple=False,
+                      atm_only=False):
     '''
     Selects the best option to trade on the basis of the forecasted implied
     volatility and the direction of stock price move. Provides the PnL after
@@ -158,6 +161,9 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         4) look_ahead: int (forecast window)
         5) long_only: bool
         6) direction: int (+/- 1)
+        7) multiple: bool - take multiple options' positions depending upon vol
+                            diff
+        8) atm_only: bool - take positions in near ATM options only
     '''
     #date, forecast_imp_vol, data_df, look_ahead, long_only, direction = options_implied_vol_df['date'][34], 0.25, options_implied_vol_df.copy(), 7, False, None
     if direction is not None:
@@ -168,7 +174,8 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     if np.logical_not(any(data_df['date'] == date_fwd)):
         date_fwd = date + pd.Timedelta(days=look_ahead+count)
         count += 1
-    output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
+    output_dict = {'PnL': np.nan, 'Trade_Type': np.nan,
+                   'Option_Type': np.nan, 'Implied_Vol': np.nan}
     flter_ind = (data_df['date'] == date) | (data_df['date'] == date_fwd)
     if long_only:
         flter_ind = flter_ind & (data_df['cp_flag'] == option_type)
@@ -186,16 +193,30 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
                                                'T'].unique())
     best_T = bisect.bisect_left(time_maturity, look_ahead)
     if len(time_maturity) == 0:
+        with open("no_liquid_options_dates.txt", "a") as myfile:
+            date = pd.to_datetime(date)
+            myfile.write('{:%Y/%m/%d}\n'.format(date))
+        #print('{:%Y/%m/%d} has no liquid options!'.format(date))
         return output_dict
-    best_T = time_maturity[best_T]
+    best_T = time_maturity[best_T]    
     # Scale daily forecast vol by the appropriate number
-    forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
+    forecast_imp_vol = forecast_imp_vol*np.sqrt(252)
+    #forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
     time_filter_ind = (best_options_df['date'] == date)
     time_filter_ind = time_filter_ind & (best_options_df['T'] == best_T)
     valid_option_ids = best_options_df.loc[time_filter_ind, 'optionid']
     valid_option_ids = np.unique(valid_option_ids)
     time_filter_ind = best_options_df['optionid'].isin(valid_option_ids)
     best_options_df = best_options_df[time_filter_ind]
+    # If only trading ATM options, remove the remaining
+    if atm_only & (best_options_df.shape[0] != 0):
+        del valid_option_ids
+        atm_idx = (np.abs(best_options_df['delta'] - 0.5) < 0.1)
+        atm_idx = atm_idx & (best_options_df['date'] == date)
+        valid_option_ids = best_options_df.loc[atm_idx, 'optionid']
+        valid_option_ids = np.unique(valid_option_ids)
+        atm_idx = best_options_df['optionid'].isin(valid_option_ids)
+        best_options_df = best_options_df[atm_idx]
     # Calculate PnL of executing trade on the best option
     if best_options_df.shape[0] != 0:        
         cur_date_df = best_options_df[best_options_df['date'] == date]
@@ -231,12 +252,18 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         account += phi*delta_arr[-2]*S_arr.iloc[-1]        
         # Short options' strategy if vol diff > 0
         pnl = account if vol_diff > 0 else -account
-        
-        output_dict['PnL'] = pnl
+        # Assume multiple positions if true
+        mult_factor = np.abs(vol_diff)/np.sqrt(best_T)/0.009 if multiple else 1
+        mult_factor = max(mult_factor, 1)
+        output_dict['PnL'] = pnl*mult_factor
+        output_dict['Trade_Type'] = -mult_factor if vol_diff > 0 else mult_factor
+        output_dict['Option_Type'] = cur_date_df['cp_flag'].iloc[0]
+        output_dict['Implied_Vol'] = cur_date_df['impl_volatility'].iloc[0]
         
     return output_dict
 
-def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7):
+def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
+               long_only=False, direction=None, atm_only=False):
     '''
     Calculates the total PnL and graphs the performance of the forecasts.
     Inputs-
@@ -245,22 +272,32 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7):
     '''
     #model_df, plot_title = forecast_df.copy(), 'GARCH Back Test'
     pnl_series = [np.nan]*model_df.shape[0]
+    options_traded = [np.nan]*model_df.shape[0]
+    option_type = [np.nan]*model_df.shape[0]
+    option_imp_vol = [np.nan]*model_df.shape[0]
     dates = np.array(model_df.index.get_level_values(0))
     forecast_vol_arr = model_df['Forecast_Vol'].values
     start = time.time()
     for count in range(model_df.shape[0]):
         cur_date = dates[count]
         forecast_vol = forecast_vol_arr[count]
-        pnl = trade_best_option(cur_date, forecast_vol,
+        out = trade_best_option(cur_date, forecast_vol,
                                 options_implied_vol_df, look_ahead=look_ahead,
-                                long_only=False, direction=None)['PnL']
-        pnl_series[count] = pnl
+                                long_only=False, direction=None,
+                                atm_only=atm_only)
+        pnl_series[count] = out['PnL']
+        options_traded[count] = out['Trade_Type']
+        option_type[count] = out['Option_Type']
+        option_imp_vol[count] = out['Implied_Vol']
         if count % 100 == 0:
             print('\nProcessed', dates[count])
     end = time.time()
     print('Total Time taken is', end-start)
     model_df['PnL'] = pnl_series
     model_df['Cum_PnL'] = model_df['PnL'].fillna(0).cumsum()
+    model_df['Options_Traded'] = options_traded
+    model_df['Option_Type'] = option_type
+    model_df['Option_Imp_Vol'] = option_imp_vol
     # Plot the cumulative PnL of the strategy
     plt.plot(model_df.index, model_df['Cum_PnL'])
     plt.xticks(rotation=90.)

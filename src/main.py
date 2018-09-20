@@ -58,8 +58,8 @@ fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
 forecast_vol = fitted_result.forecast(horizon=5, start=train_idx,
                                       align='target').variance
 forecast_vol.dropna(inplace=True)
-#forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
-forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
+forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
+#forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
 # Drop the 1st value since it's NaN
 fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
 
@@ -67,7 +67,7 @@ fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
 plt.plot(dates, spx_data["Std Dev"][1:cv_idx], label = "Realized Volatilty")
 plt.plot(dates, fitted_vol, label = "GARCH (benchmark)")
 plt.legend()
-plt.grid()
+plt.grid(True)
 plt.xticks(rotation=90.)
 plt.title("Realized vs GARCH")
 plt.savefig("../Results/Fitted_Realized_Vol.jpg")
@@ -76,11 +76,12 @@ plt.savefig("../Results/Fitted_Realized_Vol.jpg")
 forecast_dates = dates[(train_idx+4):]
 y_cv_true = spx_data.loc[spx_data["Dates"].isin(forecast_dates),
                          "Std Dev"].values
+plt.clf()
 plt.plot(forecast_dates, y_cv_true, label = "Realized Volatilty")
 plt.plot(forecast_dates, forecast_vol, label = "GARCH (benchmark)")
 plt.legend()
-plt.grid()
-plt.xticks(rotation=90.)
+plt.grid(True)
+plt.xticks(rotation=30.)
 plt.title("Realized vs GARCH")
 plt.savefig("../Results/Forecasted_Realized_Vol.jpg")
 
@@ -93,7 +94,8 @@ forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
 #%%
 # Backtest the benchmark
 benchmark_df = backtester(forecast_df, options_implied_vol_df,
-                          'GARCH Back Test', 7)
+                          'GARCH Back Test', look_ahead=7, atm_only=True)
+benchmark_df.to_csv('GARCH Performance.csv')
 #%%
 ###############################################################################
 ## C. Feature Creation
