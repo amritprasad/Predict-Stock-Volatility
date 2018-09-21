@@ -11,26 +11,21 @@ from scipy.stats import norm
 from scipy.optimize import minimize
 import os
 import matplotlib.pyplot as plt
+#from arch.univariate import GARCH,ARX
+import bisect
+import time
 #from pytrends.request import TrendReq
 #%%
 
-# Change the below to local directory
-os.chdir("C:\\Users\\Saurabh\\Documents\\Python Scripts\\Fall\\230T\\Project")
-
-implied_vol = pd.read_csv(".//data//implied_vol.csv")
-
-# garch_model = arch_model(y=implied_vol["impl_volatility"],
-#                         mean="Constant", p=1, q=1)
-# model_result = garch_model.fit()
-
-
-def fit_garch_model(ts=implied_vol["impl_volatility"], p=1, q=1):
-    ''' Takes in the time series returns the parameters. Default params are p=1
+def fit_garch_model(ts, p=1, q=1):
+    ''' Takes in the time series returns
+    returns the parameters. Default params are p=1
     and q=1 '''
-    garch_model = arch_model(y=ts, mean="Constant",
-                             p=1, q=1)
+    garch_model = arch_model(y=ts, mean="HAR", lags=[1], vol="garch",
+                             p=p, q=q)
+    #garch_model = arch_model(y=ts, vol='garch', p=p, o=0, q=q)
     model_result = garch_model.fit()
-    # params = model_result.params
+    #params = model_result.params
     return(model_result)
 
 def kernel_smoothing():
@@ -122,13 +117,12 @@ def options_implied_vol_data_clean(data_df):
                                            format='%Y%m%d')
     # Adjust the strike price because it's multiplied by 1000
     data_df['strike_price'] = data_df['strike_price']/1000
-    # Convert implied vol to decimals from %
-    data_df['impl_volatility'] = data_df['impl_volatility']/100
     # Engineer new helper columns
     data_df['mid_price'] = (data_df['best_bid'] + data_df['best_offer'])/2
     data_df['T'] = (data_df['exdate'] - data_df['date']).dt.days
+    data_df['n_days_lt'] = (data_df['date'] - data_df['last_date']).dt.days
     # Drop redundant columns
-    redundant_columns = ['exdate']
+    redundant_columns = ['exdate', 'last_date']
     data_df.drop(redundant_columns, inplace=True, axis=1)
     return data_df
 
@@ -137,29 +131,41 @@ def combine_data(options_data_df, stock_data_df):
     Extracts the stock price and dividend yield for the underlying stock.
     Combines with the options' data.
     '''
-    #stock_data_df = spx_data_df.copy()
-    stock_columns = ['Dates', 'IDX_EST_DVD_YLD', 'PX_LAST']
+    #options_data_df, stock_data_df = options_implied_vol_df.copy(), bbg_data_df.copy()
+    stock_columns = ['Dates', 'IDX_EST_DVD_YLD', 'PX_LAST',
+                     'USSOC CMPN Curncy']
     stock_data_df = stock_data_df[stock_columns]
-    stock_data_df.rename(columns={'Dates':'date', 'IDX_EST_DVD_YLD': 'y',
-                                  'PX_LAST': 'S'}, inplace=True)
+    stock_data_df.rename(columns={'Dates':'date', 'IDX_EST_DVD_YLD':'y',
+                                  'PX_LAST':'S', 'USSOC CMPN Curncy':'r'},
+                         inplace=True)
+    # Convert columns to decimals
+    stock_data_df['r'] = stock_data_df['r']/100
+    stock_data_df['y'] = stock_data_df['y']/100
+    # Forward fill prices
+    stock_data_df.fillna(method='ffill', inplace=True)
     options_data_df = options_data_df.merge(stock_data_df, on='date',
                                             how='inner')
     return options_data_df
 
 def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
-                      long_only=False, direction=None):
+                      long_only=False, direction=None, multiple=False,
+                      atm_only=False):
     '''
     Selects the best option to trade on the basis of the forecasted implied
     volatility and the direction of stock price move. Provides the PnL after
     exactly 7 days of holding the option.
     Inputs Types:
         1) date: pandas._libs.tslibs.timestamps.Timestamp
-        2) forecast_imp_vol: float
+        2) forecast_imp_vol: float (assumed to be daily vol)
         3) data_df: pandas.core.frame.DataFrame
         4) look_ahead: int (forecast window)
         5) long_only: bool
         6) direction: int (+/- 1)
+        7) multiple: bool - take multiple options' positions depending upon vol
+                            diff
+        8) atm_only: bool - take positions in near ATM options only
     '''
+    #date, forecast_imp_vol, data_df, look_ahead, long_only, direction = options_implied_vol_df['date'][34], 0.25, options_implied_vol_df.copy(), 7, False, None
     if direction is not None:
         assert direction in [-1, 1], 'Stock direction can only be +/- 1'
         option_type = 'C' if direction == 1 else 'P'
@@ -168,6 +174,8 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     if np.logical_not(any(data_df['date'] == date_fwd)):
         date_fwd = date + pd.Timedelta(days=look_ahead+count)
         count += 1
+    output_dict = {'PnL': np.nan, 'Trade_Type': np.nan,
+                   'Option_Type': np.nan, 'Implied_Vol': np.nan}
     flter_ind = (data_df['date'] == date) | (data_df['date'] == date_fwd)
     if long_only:
         flter_ind = flter_ind & (data_df['cp_flag'] == option_type)
@@ -178,9 +186,38 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     liquid_options_list = id_groupby['impl_volatility'].count() == 2
     liquid_options_list = list(liquid_options_list.index[liquid_options_list])
     liquid_filter_ind = best_options_df['optionid'].isin(liquid_options_list)
-    best_options_df = best_options_df[liquid_filter_ind]    
+    best_options_df = best_options_df[liquid_filter_ind]
+    # Choose options with smallest time to maturity >= look_ahead. Vol scaling
+    # approximation would work best that way
+    time_maturity = sorted(best_options_df.loc[best_options_df['date']==date,
+                                               'T'].unique())
+    best_T = bisect.bisect_left(time_maturity, look_ahead)
+    if len(time_maturity) == 0:
+        with open("no_liquid_options_dates.txt", "a") as myfile:
+            date = pd.to_datetime(date)
+            myfile.write('{:%Y/%m/%d}\n'.format(date))
+        #print('{:%Y/%m/%d} has no liquid options!'.format(date))
+        return output_dict
+    best_T = time_maturity[best_T]    
+    # Scale daily forecast vol by the appropriate number
+    forecast_imp_vol = forecast_imp_vol*np.sqrt(252)
+    #forecast_imp_vol = forecast_imp_vol*np.sqrt(best_T)
+    time_filter_ind = (best_options_df['date'] == date)
+    time_filter_ind = time_filter_ind & (best_options_df['T'] == best_T)
+    valid_option_ids = best_options_df.loc[time_filter_ind, 'optionid']
+    valid_option_ids = np.unique(valid_option_ids)
+    time_filter_ind = best_options_df['optionid'].isin(valid_option_ids)
+    best_options_df = best_options_df[time_filter_ind]
+    # If only trading ATM options, remove the remaining
+    if atm_only & (best_options_df.shape[0] != 0):
+        del valid_option_ids
+        atm_idx = (np.abs(best_options_df['delta'] - 0.5) < 0.1)
+        atm_idx = atm_idx & (best_options_df['date'] == date)
+        valid_option_ids = best_options_df.loc[atm_idx, 'optionid']
+        valid_option_ids = np.unique(valid_option_ids)
+        atm_idx = best_options_df['optionid'].isin(valid_option_ids)
+        best_options_df = best_options_df[atm_idx]
     # Calculate PnL of executing trade on the best option
-    output_dict = {'Unwind_Date': date_fwd, 'PnL': np.nan}
     if best_options_df.shape[0] != 0:        
         cur_date_df = best_options_df[best_options_df['date'] == date]
         cur_date_df['abs_vol_diff'] = np.abs(cur_date_df['impl_volatility']
@@ -199,8 +236,10 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         T_arr = data_df['T'][strategy_filter_ind].ffill()/365
         sigma_impl_arr = data_df['impl_volatility'][strategy_filter_ind].ffill()
         bs_pricer = np.vectorize(black_scholes_pricer)
-        option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag)
-        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr, sigma_impl_arr, call_flag, True))
+        option_price_arr = bs_pricer(S_arr, K, r_arr, y_arr, T_arr,
+                                     sigma_impl_arr, call_flag)
+        delta_arr = np.abs(bs_pricer(S_arr, K, r_arr, y_arr, T_arr,
+                                     sigma_impl_arr, call_flag, True))
         # Implement continuous delta-hedge strategy
         vol_diff = sigma_impl_arr.iloc[0] - forecast_imp_vol
         phi = 1 if call_flag else -1
@@ -213,17 +252,69 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         account += phi*delta_arr[-2]*S_arr.iloc[-1]        
         # Short options' strategy if vol diff > 0
         pnl = account if vol_diff > 0 else -account
-        
-        output_dict['PnL'] = pnl
+        # Assume multiple positions if true
+        mult_factor = np.abs(vol_diff)/np.sqrt(best_T)/0.009 if multiple else 1
+        mult_factor = max(mult_factor, 1)
+        output_dict['PnL'] = pnl*mult_factor
+        output_dict['Trade_Type'] = -mult_factor if vol_diff > 0 else mult_factor
+        output_dict['Option_Type'] = cur_date_df['cp_flag'].iloc[0]
+        output_dict['Implied_Vol'] = cur_date_df['impl_volatility'].iloc[0]
         
     return output_dict
+
+def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
+               long_only=False, direction=None, atm_only=False):
+    '''
+    Calculates the total PnL and graphs the performance of the forecasts.
+    Inputs-
+        1) model_df: DataFrame - Columns = ['Forecast_Vol'], Index = 'Dates'
+        2) options_implied_vol_df: DataFrame
+    '''
+    #model_df, plot_title = forecast_df.copy(), 'GARCH Back Test'
+    pnl_series = [np.nan]*model_df.shape[0]
+    options_traded = [np.nan]*model_df.shape[0]
+    option_type = [np.nan]*model_df.shape[0]
+    option_imp_vol = [np.nan]*model_df.shape[0]
+    dates = np.array(model_df.index.get_level_values(0))
+    forecast_vol_arr = model_df['Forecast_Vol'].values
+    start = time.time()
+    for count in range(model_df.shape[0]):
+        cur_date = dates[count]
+        forecast_vol = forecast_vol_arr[count]
+        out = trade_best_option(cur_date, forecast_vol,
+                                options_implied_vol_df, look_ahead=look_ahead,
+                                long_only=False, direction=None,
+                                atm_only=atm_only)
+        pnl_series[count] = out['PnL']
+        options_traded[count] = out['Trade_Type']
+        option_type[count] = out['Option_Type']
+        option_imp_vol[count] = out['Implied_Vol']
+        if count % 100 == 0:
+            print('\nProcessed', dates[count])
+    end = time.time()
+    print('Total Time taken is', end-start)
+    model_df['PnL'] = pnl_series
+    model_df['Cum_PnL'] = model_df['PnL'].fillna(0).cumsum()
+    model_df['Options_Traded'] = options_traded
+    model_df['Option_Type'] = option_type
+    model_df['Option_Imp_Vol'] = option_imp_vol
+    # Plot the cumulative PnL of the strategy
+    plt.plot(model_df.index, model_df['Cum_PnL'])
+    plt.xticks(rotation=90.)
+    plt.grid(True)
+    plt.xlabel('Dates')
+    plt.ylabel('Cumulative PnL($)')
+    plt.title(plot_title)
+    plt.savefig('../Results/' + plot_title + '.jpg')
+    
+    return model_df
 #%%
 ###############################################################################
 ## Scrapers
 ###############################################################################        
         
 def google_trends(keyword_list=["Blockchain"],cat= 0,
-                  time_frame ="2008-01-01 2017-12-01",
+                  time_frame ="2000-01-01 2017-12-01",
                   gprop = "",make_plot=True):
     '''
     Downloads Time serries data for the keywords.Make sure you have the library:
@@ -258,3 +349,36 @@ def google_trends(keyword_list=["Blockchain"],cat= 0,
         print("Download for ",keyword_list, "completed")
     return(df)
 
+
+def scrape_these_words(key_words = ["bears","bulls"],path = "../data",
+                       file_name = "positive_words.csv"):
+    
+    file_path = path + "/" + file_name 
+    if os.path.isfile(file_path):
+        print("File Found in path. Reading it to append")
+        this_df = pd.read_csv(file_path)
+        this_df["date"] = pd.to_datetime(this_df["date"])
+        this_df.set_index("date",inplace = True)
+        existing_words = list(this_df.columns)
+        count = 1
+    else: 
+        print("Creating new file and df")
+        count = 0
+        existing_words = []
+        
+    for this_word in key_words:
+        if this_word in existing_words:
+            print("Word: ",this_word," already exists")
+            continue
+        
+        #this_word = key_words[1]
+        temp_df= google_trends([this_word])
+        if(count == 0):
+            this_df = temp_df[[this_word]]
+            count = count +1
+        else: 
+            this_df = pd.merge(this_df,temp_df[[this_word]],left_index=True,
+                               right_index=True,how = "outer")
+    this_df.to_csv(file_path)
+            
+     

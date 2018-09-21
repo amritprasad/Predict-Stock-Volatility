@@ -14,7 +14,7 @@ quandl.ApiConfig.api_key = "9RSjfiE4HjFV_xv14Ve-"
 
 
 if __name__ == "__main__":
-    csvfile = "bbg_data.csv"
+    csvfile = "../data/bbg_data.csv"
     snp_df = pd.read_csv(csvfile)
 
     # Basic DF manipulation
@@ -51,7 +51,7 @@ if __name__ == "__main__":
         # print(len(snp_df[snp_df["k"] > 0.05])/len(snp_df))
         print(snp_df["k"].quantile(0.99))
         # print(snp_df.head(20))
-
+    snp_df.to_csv("../data/snp_with_rv_bv.csv")
     # Plot
     plt.figure(1)
     plt.plot(snp_df.loc[snp_df.index > '2012-01-01']["RV"], label="RV")
