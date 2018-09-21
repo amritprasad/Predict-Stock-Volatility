@@ -149,7 +149,7 @@ def combine_data(options_data_df, stock_data_df):
 
 def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
                       long_only=False, direction=None, multiple=False,
-                      atm_only=False):
+                      atm_only=False, trade_expiry=True):
     '''
     Selects the best option to trade on the basis of the forecasted implied
     volatility and the direction of stock price move. Provides the PnL after
@@ -164,6 +164,7 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         7) multiple: bool - take multiple options' positions depending upon vol
                             diff
         8) atm_only: bool - take positions in near ATM options only
+        9) trade_expiry: bool - trade options 7 days before expiry
     '''
     #date, forecast_imp_vol, data_df, look_ahead, long_only, direction = options_implied_vol_df['date'][34], 0.25, options_implied_vol_df.copy(), 7, False, None
     if direction is not None:
@@ -176,6 +177,10 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
         count += 1
     output_dict = {'PnL': np.nan, 'Trade_Type': np.nan,
                    'Option_Type': np.nan, 'Implied_Vol': np.nan}
+    if trade_expiry:
+        expiry_dates = data_df.loc[data_df['T'] == 0, 'date'].unique()
+        if np.datetime64(date_fwd) not in expiry_dates:
+            return output_dict
     flter_ind = (data_df['date'] == date) | (data_df['date'] == date_fwd)
     if long_only:
         flter_ind = flter_ind & (data_df['cp_flag'] == option_type)
@@ -263,7 +268,8 @@ def trade_best_option(date, forecast_imp_vol, data_df, look_ahead=7,
     return output_dict
 
 def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
-               long_only=False, direction=None, atm_only=False):
+               long_only=False, direction=None, atm_only=False,
+               trade_expiry=True):
     '''
     Calculates the total PnL and graphs the performance of the forecasts.
     Inputs-
@@ -284,7 +290,7 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
         out = trade_best_option(cur_date, forecast_vol,
                                 options_implied_vol_df, look_ahead=look_ahead,
                                 long_only=False, direction=None,
-                                atm_only=atm_only)
+                                atm_only=atm_only, trade_expiry=trade_expiry)
         pnl_series[count] = out['PnL']
         options_traded[count] = out['Trade_Type']
         option_type[count] = out['Option_Type']

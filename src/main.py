@@ -58,8 +58,8 @@ fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
 forecast_vol = fitted_result.forecast(horizon=5, start=train_idx,
                                       align='target').variance
 forecast_vol.dropna(inplace=True)
-forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
-#forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
+#forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
+forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
 # Drop the 1st value since it's NaN
 fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
 
@@ -91,11 +91,20 @@ print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
 
 # Calculate the forecast df
 forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
+
+# Calculate the realized df
+realized_df = pd.DataFrame(y_cv_true, forecast_dates, ['Forecast_Vol'])
 #%%
 # Backtest the benchmark
 benchmark_df = backtester(forecast_df, options_implied_vol_df,
                           'GARCH Back Test', look_ahead=7, atm_only=True)
 benchmark_df.to_csv('GARCH Performance.csv')
+#%%
+# Backtest the realized vol
+best_case_df = backtester(realized_df, options_implied_vol_df,
+                          'Realized Back Test', look_ahead=7, atm_only=True,
+                          trade_expiry=True)
+best_case_df.to_csv('Realized Performance.csv')
 #%%
 ###############################################################################
 ## C. Feature Creation
