@@ -12,8 +12,8 @@ import time
 from datetime import datetime, timedelta
 import json
 
-start_date = "2018-09-12"
-end_date = "2018-08-31"
+start_date = "2016-12-31"
+end_date = "2014-12-31"
 filename = "Data from " + start_date + " to " + end_date + ".txt"
 curr_date = datetime.strptime(start_date, "%Y-%m-%d")
 data_dict = {}
