@@ -37,12 +37,15 @@ spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
 spx_data["Returns"] = spx_data["SPX"].pct_change()
 spx_data.dropna(inplace=True)
 spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
-
+spx_data["Std Dev_EWMA"] = calculate_ewma_vol(spx_data["Returns"], 0.94, 5)
+returns_series = spx_data["Returns"]
+cum_mean_returns = returns_series.cumsum()/np.arange(1, len(returns_series)+1)
+spx_data["Innovations_Squared"] = (returns_series - cum_mean_returns)**2
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-returns_series = spx_data["Returns"].values
+returns_series = returns_series.values
 num_points = returns_series.size
 train_idx = int(num_points*0.6)
 cv_idx = int(num_points*0.85)
@@ -53,27 +56,43 @@ dates = spx_data["Dates"][1:cv_idx]
 
 # Scale values by a factor to ensure GARCH optimizer doesn't fail
 scale_factor = 100
-fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
-# Forecast 1 week ahead volatility on the cv set
-forecast_vol = fitted_result.forecast(horizon=5, start=train_idx,
-                                      align='target').variance
-forecast_vol.dropna(inplace=True)
-#forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
-forecast_vol = np.sqrt(forecast_vol['h.5'].values)/scale_factor
+forecast_window = 1
+fitted_result = fit_garch_model(ts=X_train*scale_factor)
+#fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
+# Forecast forecast window ahead volatility on the cv set
+init_resid = scale_factor*spx_data.iloc[train_idx]['Returns']-fitted_result.params.loc['mu']
+init_vol = spx_data.iloc[train_idx]['Std Dev']*scale_factor
+forecast_vol = forecast_garch(fitted_result,
+                              spx_data[['Returns']][train_idx:cv_idx]*scale_factor,
+                              init_resid, init_vol)/scale_factor
+#Deprecated part
+###############################################################################
+#forecast_vol = fitted_result.forecast(horizon=forecast_window, start=train_idx,
+#                                      align='target').variance
+#forecast_vol.dropna(inplace=True)
+##forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
+#colname = 'h.' + str(forecast_window)
+#forecast_vol = np.sqrt(forecast_vol[colname].values)/scale_factor
+###############################################################################
+
 # Drop the 1st value since it's NaN
 fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
 
 # Plot Benchmark against Realized Vol for entire series
-plt.plot(dates, spx_data["Std Dev"][1:cv_idx], label = "Realized Volatilty")
-plt.plot(dates, fitted_vol, label = "GARCH (benchmark)")
+train_dates = dates[1:train_idx]
+y_train = spx_data["Std Dev"][1:train_idx].values
+plt.plot(train_dates, y_train, label = "Realized Volatilty")
+plt.plot(train_dates, fitted_vol, label = "GARCH (benchmark)")
 plt.legend()
 plt.grid(True)
 plt.xticks(rotation=90.)
 plt.title("Realized vs GARCH")
 plt.savefig("../Results/Fitted_Realized_Vol.jpg")
 
-# Plot 1-week ahead Benchmark volatility against Realized Vol for test set
-forecast_dates = dates[(train_idx+4):]
+# Plot forecast window ahead Benchmark volatility against Realized Vol
+# for test set
+forecast_dates = dates[(train_idx+forecast_window-1):]
+forecast_vol = forecast_vol[1:]
 y_cv_true = spx_data.loc[spx_data["Dates"].isin(forecast_dates),
                          "Std Dev"].values
 plt.clf()
@@ -85,9 +104,13 @@ plt.xticks(rotation=30.)
 plt.title("Realized vs GARCH")
 plt.savefig("../Results/Forecasted_Realized_Vol.jpg")
 
-# Calculate Benchmark Values on the CV set
+# Calculate Benchmark Values on the CV set (against volatility)
 garch_cv_mse = np.mean((y_cv_true - forecast_vol)**2)
 print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
+
+# Calculate Naive Values on the CV set (against volatility)
+naive_cv_mse = np.mean((y_cv_true - np.nanmean(y_train))**2)
+print('The Benchmark MSE on the cv is {:.2e}'.format(naive_cv_mse))
 
 # Calculate the forecast df
 forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
@@ -102,7 +125,7 @@ benchmark_df.to_csv('GARCH Performance.csv')
 #%%
 # Backtest the realized vol
 best_case_df = backtester(realized_df, options_implied_vol_df,
-                          'Realized Back Test', look_ahead=7, atm_only=True,
+                          'Realized Back Test', look_ahead=1, atm_only=True,
                           trade_expiry=True)
 best_case_df.to_csv('Realized Performance.csv')
 #%%

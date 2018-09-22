@@ -21,12 +21,44 @@ def fit_garch_model(ts, p=1, q=1):
     ''' Takes in the time series returns
     returns the parameters. Default params are p=1
     and q=1 '''
-    garch_model = arch_model(y=ts, mean="HAR", lags=[1], vol="garch",
-                             p=p, q=q)
+    garch_model = arch_model(y=ts, vol="garch", p=p, q=q)
     #garch_model = arch_model(y=ts, vol='garch', p=p, o=0, q=q)
     model_result = garch_model.fit()
     #params = model_result.params
     return(model_result)
+    
+def forecast_garch(fitted_result, spx_pred_data, init_resid, init_vol):
+    '''
+    Produce GARCH results. Input is the fitted model.
+    '''
+    #spx_pred_data = spx_data[train_idx:cv_idx].copy()
+    mu, omega, alpha, beta = fitted_result.params
+    returns_pred_series = spx_pred_data['Returns'].values
+    returns_pred_resid = returns_pred_series - mu
+    pred_variance = np.array([np.nan]*len(returns_pred_series))
+    pred_variance[0] = omega + alpha*init_resid**2 + beta*init_vol**2
+    for i in range(1, len(pred_variance)):
+        pred_variance[i] = omega + alpha*returns_pred_resid[i-1]**2
+        pred_variance[i] += beta*pred_variance[i-1]
+    
+    pred_vol = np.sqrt(pred_variance)
+    
+    return pred_vol
+
+def forecast_nn(garch_fitted_result, init_resid, init_vol, nn_innovations):
+    '''
+    Produce NN results using the GARCH results
+    '''
+    mu, omega, alpha, beta = garch_fitted_result.params
+    pred_variance = np.array([np.nan]*len(nn_innovations))
+    pred_variance[0] = omega + alpha*init_resid**2 + beta*init_vol**2
+    for i in range(1, len(pred_variance)):
+        pred_variance[i] = omega + alpha*nn_innovations[i-1]
+        pred_variance[i] += beta*pred_variance[i-1]
+    
+    pred_vol = np.sqrt(pred_variance)
+    
+    return pred_vol
 
 def kernel_smoothing():
     ''' Place holder for Nathan's Kernel smoothing to extract the smooth part
@@ -72,6 +104,20 @@ def convert_prob_forecast_vol(forecast_prob, r, thresh=0.1, delta_t=7/365):
         return float('inf')
     else:
         return np.abs(numerator)/denominator
+    
+def calculate_ewma_vol(series, lmbda, window):
+    '''
+    Calculate volatility using Exponentially smoothed returns. Inputs-
+    1) series: returns' series
+    2) lmbda: decay parameter
+    3) window: window of returns' taken for vol extimation
+    '''
+    #series, lmbda, window = spx_data["Returns"], 0.94, 63
+    ewma_returns_series = series.ewm(alpha=1-lmbda, min_periods=window).mean()
+    ewma_vol_series = ewma_returns_series.rolling(window).std()
+    #ewma_vol_series = ewma_vol_series[~np.isnan(ewma_vol_series)]
+    
+    return ewma_vol_series
     
 def calc_imp_vol(premium, option_params):
     '''
