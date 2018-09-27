@@ -34,8 +34,10 @@ def get_snp_df(csvfile, threshold=20):
     # snp_df = snp_df.set_index("Dates")
     # print(snp_df["PX_LAST"].rolling(5).std().head())
     snp_df["Vol"] = snp_df["PX_LAST"].rolling(5).std()
+    snp_df["Return"] = np.log(snp_df["PX_LAST"]) -\
+        np.log(snp_df["PX_LAST"].shift(1))
     snp_df["Label"] = 0
-    snp_df.loc[snp_df["Vol"] >= threshold, "Label"] = 1
+    snp_df.loc[snp_df["Return"] < 0, "Label"] = 1
 
     return snp_df
 
@@ -46,6 +48,8 @@ def get_news_df(news_filename):
     '''with pd.option_context('display.max_rows', None,
                            'display.max_columns', None):
         print(news_df.head())'''
+    news_df['Date'] = news_df['Date'].astype(str)
+    news_df = news_df[news_df.Date.apply(lambda x: x.isnumeric())]
 
     return news_df
 
@@ -96,6 +100,8 @@ def get_weight_df(news_df,
     mat_df = pd.DataFrame(data=matrix, columns=col_list)
     sum_col_list = col_list[:-3]
     # Most important articles by total weight
+    for col in sum_col_list:
+        mat_df[col] = pd.to_numeric(mat_df[col])
     mat_df["tot_wt"] = mat_df[sum_col_list].sum(axis=1)
     # Getting the num_important most important articles
     mat_df = mat_df.\
@@ -112,7 +118,14 @@ if __name__ == "__main__":
     '''"2008.txt", "2009.txt", "2010.txt",
                           "2011.txt", "2012.txt", "2013.txt",
     "2014.txt", "2015.txt", "2016.txt",'''
-    news_filename_list = ["2016.txt", "2017.txt"]
+    news_filename_list = ["2000.txt", "2001.txt", "2002.txt",
+                          "2003.txt", "2004.txt", "2005.txt",
+                          "2006.txt", "2007.txt",
+                          "2008.txt", "2009.txt", "2010.txt",
+                          "2011.txt", "2012.txt", "2013.txt",
+                          "2014.txt", "2015.txt", "2016.txt",
+                          "2017.txt"]
+    # news_filename_list = ["2017.txt"]
     news_df = pd.DataFrame()
 
     for news_filename in news_filename_list:
@@ -197,16 +210,27 @@ if __name__ == "__main__":
     clf.fit(X_train, y_train_new)
     # print(sorted(clf.cv_results_.keys()))
     y_test_pred = clf.predict(X_test)
+    y_test_pred_proba = clf.predict_proba(X_test)
     accuracy = accuracy_score(y_test_new, y_test_pred)
     roc_auc = roc_auc_score(y_test_new, y_test_pred)
     print(accuracy, roc_auc)
+    # print(y_test_pred_proba)
 
-    '''X_pred = mat_df.drop(["Label", "Date", "Section", "Dates",
+    X_pred = mat_df.drop(["Label", "Date", "Section", "Dates",
                           "Category", 'tot_wt'],
                          axis=1)
 
     for col in list(X_pred):
-        X_pred[col] = pd.to_numeric(X_pred[col], errors='coerce')'''
+        X_pred[col] = pd.to_numeric(X_pred[col], errors='coerce')
+
+    y_pred_proba = clf.predict_proba(X_pred)
+    out_df = pd.DataFrame()
+    out_df["Date"] = mat_df["Date"]
+    out_df["avg_neg_proba"] = y_pred_proba[:, 0]
+    out_df["avg_pos_proba"] = y_pred_proba[:, 1]
+    out_df = out_df.groupby("Date").mean().reset_index()
+    mat_df.to_csv("vectorized_news.csv")
+    out_df.to_csv("predict_proba.csv")
 
     '''dpred = xgb.DMatrix(X_pred)
     # ypred = bst.predict(dpred, ntree_limit=bst.best_ntree_limit)
