@@ -6,6 +6,8 @@ Expected to have sections which make function calls
 ''' Imports '''
 
 from helpers import *
+from neural_network_module import *
+import statsmodels.api as sm
 
 ''' Options '''
 pd.options.mode.chained_assignment = None
@@ -38,86 +40,112 @@ spx_data["Returns"] = spx_data["SPX"].pct_change()
 spx_data['Log_Returns'] = spx_data[['SPX']].apply(lambda x: np.log(x/x.shift(1)))
 spx_data.dropna(inplace=True)
 spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
-spx_data["Std Dev_EWMA"] = calculate_ewma_vol(spx_data["Returns"], 0.94, 5)
+spx_data['Variance'] = spx_data['Std Dev']**2
 returns_series = spx_data["Returns"]
 cum_mean_returns = returns_series.cumsum()/np.arange(1, len(returns_series)+1)
 spx_data["Innovations_Squared"] = (returns_series - cum_mean_returns)**2
+regression_df = spx_data.resample('W-Fri', on='Dates').last()
+regression_df.dropna(inplace=True)
+y = regression_df['Variance'].values[1:]
+X = regression_df[['Variance', 'Innovations_Squared']].values[:-1]
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
 returns_series = returns_series.values
-num_points = returns_series.size
+X = sm.add_constant(X)
+num_points = y.size
 train_idx = int(num_points*0.6)
 cv_idx = int(num_points*0.85)
-X_train = returns_series[:train_idx]
-X_cv = returns_series[train_idx:cv_idx]
-X_test = returns_series[cv_idx:]
-dates = spx_data["Dates"][1:cv_idx]
+X_train, y_train = X[:train_idx], y[:train_idx]
+X_cv, y_cv = X[train_idx:cv_idx], y[train_idx:cv_idx]
+X_test, y_test = X[cv_idx:], y[cv_idx:]
+dates = regression_df['Dates'][1:]
 
-# Scale values by a factor to ensure GARCH optimizer doesn't fail
-scale_factor = 100
-forecast_window = 1
-fitted_result = fit_garch_model(ts=X_train*scale_factor)
-#fitted_result = fit_garch_model(ts=np.append(X_train, X_cv)*scale_factor)
-# Forecast forecast window ahead volatility on the cv set
-init_resid = scale_factor*spx_data.iloc[train_idx]['Returns']-fitted_result.params.loc['mu']
-init_vol = spx_data.iloc[train_idx]['Std Dev']*scale_factor
-forecast_vol = forecast_garch(fitted_result,
-                              spx_data[['Returns']][train_idx:cv_idx]*scale_factor,
-                              init_resid, init_vol)/scale_factor
-#Deprecated part
 ###############################################################################
-#forecast_vol = fitted_result.forecast(horizon=forecast_window, start=train_idx,
-#                                      align='target').variance
-#forecast_vol.dropna(inplace=True)
-##forecast_vol = np.sqrt(forecast_vol.mean(axis=1).values)/scale_factor
-#colname = 'h.' + str(forecast_window)
-#forecast_vol = np.sqrt(forecast_vol[colname].values)/scale_factor
+# B.1. Benchmark calculations
 ###############################################################################
+garch_result = sm.OLS(y_train, X_train).fit()
+garch_params = garch_result.params
+#Forecast on the cv set using the fitted parameters
+#Take square root to convert variances to vol
+y_cv_benchmark = np.sqrt(X_cv @ garch_params)
+y_train_benchmark = np.sqrt(X_train @ garch_params)
 
-# Drop the 1st value since it's NaN
-fitted_vol = fitted_result.conditional_volatility[1:]/scale_factor
+###############################################################################
+# B.2. Naive calculations
+###############################################################################
+#Forecast using the naive model
+y_cv_naive = np.mean(np.sqrt(y_train))
 
-# Plot Benchmark against Realized Vol for entire series
-train_dates = dates[1:train_idx]
-y_train = spx_data["Std Dev"][1:train_idx].values
-plt.plot(train_dates, y_train, label = "Realized Volatilty")
-plt.plot(train_dates, fitted_vol, label = "GARCH (benchmark)")
+###############################################################################
+# B.3. Neural Network calculations
+###############################################################################
+#Fit NN to training data
+stddev_window = 5
+lag_innov = np.sqrt(X[:, 1])
+#lag_innov = X[:,1]
+innov = np.sqrt(y)
+jnn_weights, nn_fit_vol, nn_forecast_vol = run_example(lag_innov, innov,
+                                                       stddev_window,
+                                                       train_idx, cv_idx,
+                                                       batch_size=256,
+                                                       epochs=1000,
+                                                       plot_flag=False)
+
+# Plot Benchmark against Realized Vol for trained series
+train_dates = dates[:train_idx]
+y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
+                                 "Std Dev"].values
+plt.plot(train_dates, y_train_true, label = "Realized Volatilty")
+plt.plot(train_dates, y_train_benchmark, label = "GARCH (benchmark)")
+plt.plot(train_dates, nn_fit_vol, label = "Latest State of the Art",
+         marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
 plt.xticks(rotation=90.)
-plt.title("Realized vs GARCH")
-plt.savefig("../Results/Fitted_Realized_Vol.jpg")
+plt.title("Realized vs GARCH vs State of the Art (Fitted)")
+plt.savefig("../Results/Fitted_Comparison_Vol.jpg")
 
-# Plot forecast window ahead Benchmark volatility against Realized Vol
-# for test set
-forecast_dates = dates[(train_idx+forecast_window-1):]
-forecast_vol = forecast_vol[1:]
-y_cv_true = spx_data.loc[spx_data["Dates"].isin(forecast_dates),
-                         "Std Dev"].values
+# Plot forecast window ahead Benchmark and NN volatility against Realized Vol
+# for cv set
+forecast_dates = dates[train_idx:cv_idx]
+y_cv_true = regression_df.loc[regression_df["Dates"].isin(forecast_dates),
+                              "Std Dev"].values
 plt.clf()
+plt.rcParams["figure.figsize"] = (15,10)
 plt.plot(forecast_dates, y_cv_true, label = "Realized Volatilty")
-plt.plot(forecast_dates, forecast_vol, label = "GARCH (benchmark)")
+plt.plot(forecast_dates, y_cv_benchmark, label = "GARCH (benchmark)",
+         marker='.')
+plt.plot(forecast_dates, nn_forecast_vol, label = "Latest State of the Art",
+         marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
 plt.xticks(rotation=30.)
-plt.title("Realized vs GARCH")
-plt.savefig("../Results/Forecasted_Realized_Vol.jpg")
+plt.title("Realized vs GARCH vs State of the Art")
+plt.savefig("../Results/Forecast_Comparison_Vol.jpg")
 
 # Calculate Benchmark Values on the CV set (against volatility)
-garch_cv_mse = np.mean((y_cv_true - forecast_vol)**2)
+garch_cv_mse = np.mean((y_cv_benchmark - y_cv_true)**2)
 print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
 
+# Calculate NN Values on the CV set (against volatility)
+nn_cv_mse = np.mean((y_cv_true - nn_forecast_vol)**2)
+print('The NN MSE on the cv is {:.2e}'.format(nn_cv_mse))
+
 # Calculate Naive Values on the CV set (against volatility)
-naive_cv_mse = np.mean((y_cv_true - np.nanmean(y_train))**2)
-print('The Benchmark MSE on the cv is {:.2e}'.format(naive_cv_mse))
+naive_cv_mse = np.mean((y_cv_true - y_cv_naive)**2)
+print('The Naive MSE on the cv is {:.2e}'.format(naive_cv_mse))
 
 # Calculate the forecast df
-forecast_df = pd.DataFrame(forecast_vol, forecast_dates, ['Forecast_Vol'])
+forecast_df = pd.DataFrame(y_cv_benchmark, forecast_dates, ['Forecast_Vol'])
 
 # Calculate the realized df
 realized_df = pd.DataFrame(y_cv_true, forecast_dates, ['Forecast_Vol'])
+
+# Calculate the NN forecast df
+nn_forecast_df = pd.DataFrame(nn_forecast_vol, forecast_dates,
+                              ['Forecast_Vol'])
 #%%
 # Backtest the benchmark
 benchmark_df = backtester(forecast_df, options_implied_vol_df,
@@ -126,9 +154,14 @@ benchmark_df.to_csv('GARCH Performance.csv')
 #%%
 # Backtest the realized vol
 best_case_df = backtester(realized_df, options_implied_vol_df,
-                          'Realized Back Test', look_ahead=1, atm_only=True,
+                          'Realized Back Test', look_ahead=7, atm_only=True,
                           trade_expiry=True)
 best_case_df.to_csv('Realized Performance.csv')
+#%%
+# Backtest the Neural Net
+nn_df = backtester(nn_forecast_df, options_implied_vol_df,
+                   'Neural Net Back Test', look_ahead=7, atm_only=True)
+nn_df.to_csv('NN Performance.csv')
 #%%
 ###############################################################################
 ## C. Feature Creation
@@ -178,4 +211,3 @@ scrape_these_words(key_words =positive_words ,path = "../data",
 
 scrape_these_words(key_words =negative_words ,path = "../data",
                        file_name = "negative_words_2000.csv")
-   

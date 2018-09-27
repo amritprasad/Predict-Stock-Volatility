@@ -350,6 +350,8 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     model_df['Options_Traded'] = options_traded
     model_df['Option_Type'] = option_type
     model_df['Option_Imp_Vol'] = option_imp_vol
+    final_cum_pnl = model_df['Cum_PnL'].iloc[-1]
+    print('The final Cumulative PnL is ${:.2f}'.format(final_cum_pnl))
     # Plot the cumulative PnL of the strategy
     plt.plot(model_df.index, model_df['Cum_PnL'])
     plt.xticks(rotation=90.)
