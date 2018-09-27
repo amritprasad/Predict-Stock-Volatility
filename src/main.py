@@ -43,7 +43,8 @@ spx_data["Std Dev"] = spx_data["Returns"].rolling(5).std()
 spx_data['Variance'] = spx_data['Std Dev']**2
 returns_series = spx_data["Returns"]
 cum_mean_returns = returns_series.cumsum()/np.arange(1, len(returns_series)+1)
-spx_data["Innovations_Squared"] = (returns_series - cum_mean_returns)**2
+spx_data['Innovations'] = returns_series - cum_mean_returns
+spx_data["Innovations_Squared"] = spx_data['Innovations']**2
 regression_df = spx_data.resample('W-Fri', on='Dates').last()
 regression_df.dropna(inplace=True)
 y = regression_df['Variance'].values[1:]
@@ -52,7 +53,6 @@ X = regression_df[['Variance', 'Innovations_Squared']].values[:-1]
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-returns_series = returns_series.values
 X = sm.add_constant(X)
 num_points = y.size
 train_idx = int(num_points*0.6)
@@ -83,16 +83,21 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 ###############################################################################
 #Fit NN to training data
 stddev_window = 5
-lag_innov = np.sqrt(X[:, 1])
-#lag_innov = X[:,1]
+#lag_innov = np.sqrt(X[:, 1])
+lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['Innovations'].values[:-1]))
+num_nn_inputs = lag_innov.shape[1]
 innov = np.sqrt(y)
-jnn_weights, nn_fit_vol, nn_forecast_vol = run_example(lag_innov, innov,
-                                                       stddev_window,
-                                                       train_idx, cv_idx,
-                                                       batch_size=256,
-                                                       epochs=1000,
-                                                       plot_flag=False)
-
+jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
+                                                      stddev_window,
+                                                      train_idx, cv_idx,
+                                                      batch_size=256,
+                                                      epochs=1000,
+                                                      plot_flag=False,
+                                                      jnn_size=(num_nn_inputs,
+                                                                1, 1))
+jnn_weights = jnn_trained.get_weights()
 # Plot Benchmark against Realized Vol for trained series
 train_dates = dates[:train_idx]
 y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
