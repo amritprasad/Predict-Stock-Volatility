@@ -366,10 +366,27 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
 ###############################################################################
 ## Scrapers
 ###############################################################################        
-        
-def google_trends(keyword_list=["Blockchain"],cat= 0,
-                  time_frame ="2000-01-01 2017-12-01",
-                  gprop = "",make_plot=True):
+def extract_words_pdf(filepath):
+    '''
+    Extracts the words from the pdf file
+    '''
+    import PyPDF2
+    pdf_file = open(filepath, 'rb')
+    read_pdf = PyPDF2.PdfFileReader(pdf_file)
+    number_of_pages = read_pdf.getNumPages()
+    words_list = []
+    for n in range(number_of_pages):
+        page = read_pdf.getPage(n)
+        page_content = page.extractText()
+        page_words_list = page_content.split('\n')
+        page_words_list = [w.strip() for w in page_words_list if w.isupper()]
+        words_list += page_words_list
+
+    return words_list
+
+def google_trends(keyword_list=["Blockchain"],cat= 784,
+                  time_frame ="2000-01-01 2017-12-31",
+                  gprop = "",make_plot=True, geo='USA'):
     '''
     Downloads Time serries data for the keywords.Make sure you have the library:
     pip install pytrends
@@ -394,7 +411,7 @@ def google_trends(keyword_list=["Blockchain"],cat= 0,
     pytrends = TrendReq(hl='en-US',tz=360)
     #kw_list = ["Blockchain"]
     pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe=time_frame,
-                           geo='', gprop='')
+                           geo=geo, gprop='')
     df=pytrends.interest_over_time()
     if make_plot ==False:
         print("Your Download looks like:")

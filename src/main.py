@@ -7,11 +7,14 @@ Expected to have sections which make function calls
 
 from helpers import *
 from neural_network_module import *
+from pandas.tseries.offsets import WeekOfMonth
 import statsmodels.api as sm
+import warnings
 
 ''' Options '''
 pd.options.mode.chained_assignment = None
 pd.set_option("display.max_columns", 20)
+warnings.filterwarnings('once')
 #%%
 ###############################################################################
 ## A. Read data and clean
@@ -30,9 +33,12 @@ price_history_df['Dates'] = pd.to_datetime(price_history_df['Dates'])
 bbg_data_df = pd.merge(spx_data_df, price_history_df, on='Dates', how='outer')
 options_implied_vol_df = options_implied_vol_data_clean(options_implied_vol_df)
 options_implied_vol_df = combine_data(options_implied_vol_df, bbg_data_df)
-#fridays_list = list(options_implied_vol_df.resample('W-Fri',
-#                                                    on='date')['date'].last())
-spx_data = spx_data_df[['Dates', 'PX_LAST']]
+#Construct features
+wom = WeekOfMonth(week=3, weekday=4)
+bbg_data_df['Time_to_Expiry'] = bbg_data_df['Dates'].apply(lambda x:
+                                                          (wom.rollforward(x)
+                                                           - x).days)
+spx_data = bbg_data_df[['Dates', 'PX_LAST', 'Time_to_Expiry']]
 spx_data['PX_LAST'].fillna(method='ffill', inplace=True)
 spx_data.rename(columns={'PX_LAST':'SPX'}, inplace=True)
 spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
@@ -49,11 +55,11 @@ regression_df = spx_data.resample('W-Fri', on='Dates').last()
 regression_df.dropna(inplace=True)
 y = regression_df['Variance'].values[1:]
 X = regression_df[['Variance', 'Innovations_Squared']].values[:-1]
+X = sm.add_constant(X)
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-X = sm.add_constant(X)
 num_points = y.size
 train_idx = int(num_points*0.6)
 cv_idx = int(num_points*0.85)
@@ -82,13 +88,34 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 # B.3. Neural Network calculations
 ###############################################################################
 #Fit NN to training data
+#Latest Features' List
+#1) Lagged Vol
+#2) Lagged Innovations
+#3) Time to Expiry
+#4) Volume
+time_exp = regression_df['Time_to_Expiry'].values[:-1]/1400
 stddev_window = 5
-#lag_innov = np.sqrt(X[:, 1])
-lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
+lag_innov = np.sqrt(X[:, 1])
+#lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
 lag_innov = np.column_stack((lag_innov,
                              regression_df['Innovations'].values[:-1]))
-num_nn_inputs = lag_innov.shape[1]
+lag_innov = np.column_stack((lag_innov, time_exp))
+num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
+args_dict = {
+             'hidden_initializer': 'he_normal',
+             'dropout_rate': 0.2,
+             'rnn_initializer': 'he_normal',
+             'optim_learning_rate': 0.001,
+             'loss': 'mean_squared_error',
+             #'loss': custom_error,
+             'hidden_reg_l1': 0.,
+             'hidden_reg_l2': 0.,
+             'output_reg_l1': 0.,
+             'output_reg_l2': 0.,
+             'hidden_activation': ELU(alpha=1.),
+             'output_activation': 'linear'
+            }
 jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
                                                       stddev_window,
                                                       train_idx, cv_idx,
@@ -96,7 +123,8 @@ jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
                                                       epochs=1000,
                                                       plot_flag=False,
                                                       jnn_size=(num_nn_inputs,
-                                                                1, 1))
+                                                                1, 1),
+                                                      args_dict=args_dict)
 jnn_weights = jnn_trained.get_weights()
 # Plot Benchmark against Realized Vol for trained series
 train_dates = dates[:train_idx]
@@ -211,8 +239,16 @@ negative_words = ["dating","birthrate","reacting","lofty","accelerators",
                   "depressing","specifications","businessmen","diluting"
                   ]
 
-scrape_these_words(key_words =positive_words ,path = "../data",
+filenames = ['LM_Negative.pdf', 'LM_Positive.pdf', 'LM_Uncertainty.pdf']
+directory = 'D:/MFE/Semester Courses/Fall/230T/Project/Sentiment/'
+neg_words_list = extract_words_pdf(os.path.join(directory, filenames[0]))
+pos_words_list = extract_words_pdf(os.path.join(directory, filenames[1]))
+uncert_words_list = extract_words_pdf(os.path.join(directory, filenames[2]))
+
+positive_words = pos_words_list + ["bulls"]
+negative_words = neg_words_list + ["bears"]
+scrape_these_words(key_words =positive_words ,path = "../../Data",
                        file_name = "positive_words_2000.csv")
 
-scrape_these_words(key_words =negative_words ,path = "../data",
+scrape_these_words(key_words =negative_words ,path = "../../Data",
                        file_name = "negative_words_2000.csv")
