@@ -350,6 +350,8 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     model_df['Options_Traded'] = options_traded
     model_df['Option_Type'] = option_type
     model_df['Option_Imp_Vol'] = option_imp_vol
+    final_cum_pnl = model_df['Cum_PnL'].iloc[-1]
+    print('The final Cumulative PnL is ${:.2f}'.format(final_cum_pnl))
     # Plot the cumulative PnL of the strategy
     plt.plot(model_df.index, model_df['Cum_PnL'])
     plt.xticks(rotation=90.)
@@ -364,10 +366,27 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
 ###############################################################################
 ## Scrapers
 ###############################################################################        
-        
-def google_trends(keyword_list=["Blockchain"],cat= 0,
-                  time_frame ="2000-01-01 2017-12-01",
-                  gprop = "",make_plot=True):
+def extract_words_pdf(filepath):
+    '''
+    Extracts the words from the pdf file
+    '''
+    import PyPDF2
+    pdf_file = open(filepath, 'rb')
+    read_pdf = PyPDF2.PdfFileReader(pdf_file)
+    number_of_pages = read_pdf.getNumPages()
+    words_list = []
+    for n in range(number_of_pages):
+        page = read_pdf.getPage(n)
+        page_content = page.extractText()
+        page_words_list = page_content.split('\n')
+        page_words_list = [w.strip() for w in page_words_list if w.isupper()]
+        words_list += page_words_list
+
+    return words_list
+
+def google_trends(keyword_list=["Blockchain"],cat= 12,
+                  time_frame ="2000-01-01 2017-12-31",
+                  gprop = "",make_plot=False, geo='US'):
     '''
     Downloads Time serries data for the keywords.Make sure you have the library:
     pip install pytrends
@@ -392,9 +411,9 @@ def google_trends(keyword_list=["Blockchain"],cat= 0,
     pytrends = TrendReq(hl='en-US',tz=360)
     #kw_list = ["Blockchain"]
     pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe=time_frame,
-                           geo='', gprop='')
+                           geo=geo, gprop='')
     df=pytrends.interest_over_time()
-    if make_plot ==False:
+    if make_plot == True:
         print("Your Download looks like:")
         df.plot.line()
     else: 
