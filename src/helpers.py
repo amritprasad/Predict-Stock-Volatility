@@ -384,9 +384,9 @@ def extract_words_pdf(filepath):
 
     return words_list
 
-def google_trends(keyword_list=["Blockchain"],cat= 784,
+def google_trends(keyword_list=["Blockchain"],cat= 12,
                   time_frame ="2000-01-01 2017-12-31",
-                  gprop = "",make_plot=True, geo='USA'):
+                  gprop = "",make_plot=False, geo='US'):
     '''
     Downloads Time serries data for the keywords.Make sure you have the library:
     pip install pytrends
@@ -413,7 +413,7 @@ def google_trends(keyword_list=["Blockchain"],cat= 784,
     pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe=time_frame,
                            geo=geo, gprop='')
     df=pytrends.interest_over_time()
-    if make_plot ==False:
+    if make_plot == True:
         print("Your Download looks like:")
         df.plot.line()
     else: 

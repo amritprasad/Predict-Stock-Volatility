@@ -93,8 +93,8 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 #2) Lagged Innovations
 #3) Time to Expiry
 #4) Volume
-time_exp = regression_df['Time_to_Expiry'].values[:-1]/1400
-stddev_window = 5
+time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
+scale_factor = 1E0
 lag_innov = np.sqrt(X[:, 1])
 #lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
 lag_innov = np.column_stack((lag_innov,
@@ -104,39 +104,41 @@ num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
 args_dict = {
              'hidden_initializer': 'he_normal',
-             'dropout_rate': 0.2,
+             'dropout_rate': 0.,
              'rnn_initializer': 'he_normal',
              'optim_learning_rate': 0.001,
              'loss': 'mean_squared_error',
              #'loss': custom_error,
-             'hidden_reg_l1': 0.,
-             'hidden_reg_l2': 0.,
+             'hidden_reg_l1_1': 0.,
+             'hidden_reg_l2_1': 0.,
+             'hidden_reg_l1_2': 0.,
+             'hidden_reg_l2_2': 0.,
              'output_reg_l1': 0.,
              'output_reg_l2': 0.,
              'hidden_activation': ELU(alpha=1.),
              'output_activation': 'linear'
             }
 jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
-                                                      stddev_window,
+                                                      scale_factor,
                                                       train_idx, cv_idx,
-                                                      batch_size=256,
-                                                      epochs=1000,
+                                                      batch_size=64,
+                                                      epochs=2000,
                                                       plot_flag=False,
-                                                      jnn_size=(num_nn_inputs,
-                                                                1, 1),
+                                                      jnn_isize=num_nn_inputs,
                                                       args_dict=args_dict)
 jnn_weights = jnn_trained.get_weights()
 # Plot Benchmark against Realized Vol for trained series
 train_dates = dates[:train_idx]
 y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
                                  "Std Dev"].values
+plt.rcParams["figure.figsize"] = (15, 10)
 plt.plot(train_dates, y_train_true, label = "Realized Volatilty")
 plt.plot(train_dates, y_train_benchmark, label = "GARCH (benchmark)")
 plt.plot(train_dates, nn_fit_vol, label = "Latest State of the Art",
          marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
-plt.xticks(rotation=90.)
+plt.xticks(rotation=30.)
 plt.title("Realized vs GARCH vs State of the Art (Fitted)")
 plt.savefig("../Results/Fitted_Comparison_Vol.jpg")
 
@@ -146,7 +148,7 @@ forecast_dates = dates[train_idx:cv_idx]
 y_cv_true = regression_df.loc[regression_df["Dates"].isin(forecast_dates),
                               "Std Dev"].values
 plt.clf()
-plt.rcParams["figure.figsize"] = (15,10)
+plt.rcParams["figure.figsize"] = (15, 10)
 plt.plot(forecast_dates, y_cv_true, label = "Realized Volatilty")
 plt.plot(forecast_dates, y_cv_benchmark, label = "GARCH (benchmark)",
          marker='.')
@@ -247,8 +249,20 @@ uncert_words_list = extract_words_pdf(os.path.join(directory, filenames[2]))
 
 positive_words = pos_words_list + ["bulls"]
 negative_words = neg_words_list + ["bears"]
+negative_words = [x.split(' ')[-1] for x in negative_words]
+negative_words = ['LOSS', 'LOSSES', 'CLAIMS', 'IMPAIRMENT', 'AGAINST',
+                  'ADVERSE', 'RESTATED', 'ADVERSELY', 'RESTRUCTURING',
+                  'LITIGATION', 'DISCONTINUED', 'TERMINATION', 'DECLINE',
+                  'CLOSING', 'FAILURE', 'UNABLE', 'DAMAGES', 'DOUBTFUL',
+                  'LIMITATIONS', 'FORCE', 'VOLATILITY', 'CRITICAL',
+                  'TERMINATED', 'IMPAIRED', 'COMPLAINT', 'DEFAULT',
+                  'NEGATIVE', 'DEFENDANTS', 'PLAINTIFFS', 'DIFFICULT']
+uncertain_words = uncert_words_list
 scrape_these_words(key_words =positive_words ,path = "../../Data",
                        file_name = "positive_words_2000.csv")
 
 scrape_these_words(key_words =negative_words ,path = "../../Data",
                        file_name = "negative_words_2000.csv")
+
+scrape_these_words(key_words =negative_words ,path = "../../Data",
+                       file_name = "uncertain_words_2000.csv")
