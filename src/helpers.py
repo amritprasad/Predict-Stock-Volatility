@@ -362,7 +362,25 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     plt.savefig('../Results/' + plot_title + '.jpg')
     
     return model_df
-#%%
+# %%
+#Feature Engineering
+def feature_normalization(df, col_names, train_date_end, scale_down=1):
+    '''
+    Implement z-score normalization using the mean and std-dev of the training
+    data
+    '''
+    #df, col_names = regression_df.copy(), ['PUT_CALL_VOLUME_RATIO_CUR_DAY',
+    #                                       'PX_VOLUME', 'Time_to_Expiry']
+    for col in col_names:
+        filter_train = df['Dates'] <= train_date_end
+        mu = np.nanmean(df[col][filter_train])
+        std_dev = np.nanstd(df[col][filter_train], ddof=1)
+        df[col] = (df[col] - mu)/std_dev
+    
+    df[col_names] = df[col_names]/scale_down
+    
+    return df
+# %%
 ###############################################################################
 ## Scrapers
 ###############################################################################        
@@ -383,6 +401,14 @@ def extract_words_pdf(filepath):
         words_list += page_words_list
 
     return words_list
+
+def z_score(gtrend_row):
+    '''
+    Returns Z-Score
+    '''
+    gtrend_row = (gtrend_row-np.nanmean(gtrend_row))/np.nanstd(gtrend_row,
+                                                               ddof=1)
+    return gtrend_row
 
 def google_trends(keyword_list=["Blockchain"],cat= 12,
                   time_frame ="2000-01-01 2017-12-31",

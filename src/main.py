@@ -38,7 +38,9 @@ wom = WeekOfMonth(week=3, weekday=4)
 bbg_data_df['Time_to_Expiry'] = bbg_data_df['Dates'].apply(lambda x:
                                                           (wom.rollforward(x)
                                                            - x).days)
-spx_data = bbg_data_df[['Dates', 'PX_LAST', 'Time_to_Expiry']]
+spx_data = bbg_data_df[['Dates', 'PX_LAST', 'Time_to_Expiry',
+                        'OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL',
+                        'PX_VOLUME']]
 spx_data['PX_LAST'].fillna(method='ffill', inplace=True)
 spx_data.rename(columns={'PX_LAST':'SPX'}, inplace=True)
 spx_data["Dates"] =  pd.to_datetime(spx_data["Dates"])
@@ -52,6 +54,13 @@ cum_mean_returns = returns_series.cumsum()/np.arange(1, len(returns_series)+1)
 spx_data['Innovations'] = returns_series - cum_mean_returns
 spx_data["Innovations_Squared"] = spx_data['Innovations']**2
 regression_df = spx_data.resample('W-Fri', on='Dates').last()
+cols_to_sum = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME']
+regression_df.drop(columns=cols_to_sum, inplace=True)
+temp_df = spx_data[cols_to_sum + ['Dates']].resample('W-Fri', on='Dates').sum()
+regression_df = regression_df.merge(temp_df, left_index=True,
+                                    right_index=True, how='outer')
+print('Checking how clean the regression_df is.\nFollowing is the no. of NAs-')
+print(regression_df.isna().sum())
 regression_df.dropna(inplace=True)
 y = regression_df['Variance'].values[1:]
 X = regression_df[['Variance', 'Innovations_Squared']].values[:-1]
@@ -93,12 +102,24 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 #2) Lagged Innovations
 #3) Time to Expiry
 #4) Volume
+train_dates = dates[:train_idx]
+train_date_end = train_dates[-1]
+cols_to_normalize = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME']
+regression_df = feature_normalization(regression_df, cols_to_normalize,
+                                      train_date_end, scale_down=1)
 time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
-scale_factor = 1E0
+#time_exp = regression_df['Time_to_Expiry'].values[:-1]
+scale_factor = 1
 lag_innov = np.sqrt(X[:, 1])
 #lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
 lag_innov = np.column_stack((lag_innov,
                              regression_df['Innovations'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['OPEN_INT_TOTAL_CALL'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['PX_VOLUME'].values[:-1]))
 lag_innov = np.column_stack((lag_innov, time_exp))
 num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
@@ -106,7 +127,7 @@ args_dict = {
              'hidden_initializer': 'he_normal',
              'dropout_rate': 0.,
              'rnn_initializer': 'he_normal',
-             'optim_learning_rate': 0.001,
+             'optim_learning_rate': 0.005,
              'loss': 'mean_squared_error',
              #'loss': custom_error,
              'hidden_reg_l1_1': 0.,
@@ -118,17 +139,17 @@ args_dict = {
              'hidden_activation': ELU(alpha=1.),
              'output_activation': 'linear'
             }
+from neural_network_module import *
 jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
                                                       scale_factor,
                                                       train_idx, cv_idx,
                                                       batch_size=64,
-                                                      epochs=2000,
+                                                      epochs=3000,
                                                       plot_flag=False,
                                                       jnn_isize=num_nn_inputs,
                                                       args_dict=args_dict)
 jnn_weights = jnn_trained.get_weights()
 # Plot Benchmark against Realized Vol for trained series
-train_dates = dates[:train_idx]
 y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
                                  "Std Dev"].values
 plt.rcParams["figure.figsize"] = (15, 10)

@@ -4,6 +4,8 @@ Author: Nathan Johnson
 Date: 9/21/2018
 """
 import keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Reshape, SimpleRNN, Lambda, Activation
 from keras import layers
 from keras import optimizers
 import keras.backend as K
@@ -12,6 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numpy.random import seed
 from tensorflow import set_random_seed
+import tensorflow as tf
 
 
 def run_jnn(lag_innov, innov, scale_factor,
@@ -36,7 +39,7 @@ def run_jnn(lag_innov, innov, scale_factor,
               # batch_size=len(x_train),
               batch_size=batch_size)
 
-    fit = jnn.predict(x_train).ravel()
+    fit = jnn.predict(x_train).ravel()/scale_factor
     pred = jnn.predict(x_cv).ravel()/scale_factor
     mse = np.mean((y_cv - pred)**2)
 
@@ -56,20 +59,21 @@ def prepare_tensors(array_list):
 def build_jnn_deprecated(input_len, hidden_node_num, output_len):
     #generates a keras Sequential model of a JNN(p, q, t)
     #input_len, hidden_node_num, output_len = 1, 1, 1
-    ilayer = layers.Input(shape=(input_len,))
-    hidden = layers.Dense(hidden_node_num, 
-                          kernel_initializer='he_normal',
-                          #activation='sigmoid'
-                          activation=ELU()
-                          )(ilayer)
-    drop = layers.Dropout(0.2, seed=42)(hidden)
-    resh = layers.Reshape((1, hidden_node_num))(drop)
-    rnn = layers.SimpleRNN(output_len,
-                           return_sequences=True,
-                           activation='linear',
-#                           activation=ELU(),
-                           kernel_initializer='he_normal')(resh)
-    model = keras.models.Model(ilayer, rnn)
+    def layer_norm(x):
+        return tf.contrib.layers.layer_norm(x)
+    
+    model = Sequential()
+    model.add(Dense(hidden_node_num, 
+                    input_shape=(input_len,),
+                    kernel_initializer='he_normal'))
+    model.add(Activation(activation=ELU()))
+    model.add(Lambda(layer_norm))
+    model.add(Dropout(0.2, seed=42))
+    model.add(Reshape((1, hidden_node_num)))
+    model.add(SimpleRNN(output_len, 
+                        return_sequences=True,
+                        kernel_initializer='he_normal'))
+    model.add(Activation(activation='linear'))
 
     #optimizer = optimizers.adam(lr = 0.2)
     optimizer = optimizers.adam()
@@ -79,7 +83,7 @@ def build_jnn_deprecated(input_len, hidden_node_num, output_len):
                   )
     return model
 
-def build_jnn(input_len, args_dict):
+def build_jnn(input_len, args_dict):    
     '''
     Create the structure for the JNN. args_dict-
     1) hidden_initializer
@@ -97,6 +101,8 @@ def build_jnn(input_len, args_dict):
     13) output_activation
     '''
     #generates a keras Sequential model of a JNN(p, q, t)
+    def layer_norm(x): #used in lambda layer for layer normalization
+        return tf.contrib.layers.layer_norm(x)
     #input_len, hidden_node_num, output_len = 1, 1, 1
     # Extract the args
     hidden_initializer = args_dict['hidden_initializer']
@@ -124,18 +130,24 @@ def build_jnn(input_len, args_dict):
                             kernel_regularizer=hidden_reg_1,
                             activation=hidden_activation
                            )(ilayer)
-    drop_1 = layers.Dropout(dropout_rate, seed=42)(hidden_1)
-    resh_hidden_1 = layers.Reshape((1, 2))(drop_1)
-    hidden_2 = layers.Dense(1, kernel_initializer=hidden_initializer,
+    #layer_norm_1 = layers.Lambda(layer_norm)(hidden_1)
+    #drop_1 = layers.Dropout(dropout_rate, seed=42)(layer_norm_1)
+    #drop_1 = layers.Dropout(dropout_rate, seed=42)(hidden_1)
+    #resh_hidden_1 = layers.Reshape((1, 2))(layer_norm_1)
+    resh_hidden_1 = layers.Reshape((1, 2))(hidden_1)
+    hidden_2 = layers.Dense(2, kernel_initializer=hidden_initializer,
                             kernel_regularizer=hidden_reg_2,
                             activation=hidden_activation)(resh_hidden_1)
-    drop_2 = layers.Dropout(dropout_rate, seed=42)(hidden_2)
-    resh_hidden_2 = layers.Reshape((1, 1))(drop_2)
+    #layer_norm_2 = layers.Lambda(layer_norm)(hidden_2)
+    #drop_2 = layers.Dropout(dropout_rate, seed=42)(layer_norm_2)
+    #drop_2 = layers.Dropout(dropout_rate, seed=42)(hidden_2)
+    resh_hidden_2 = layers.Reshape((1, 2))(hidden_2)
     rnn = layers.SimpleRNN(1,
                            return_sequences=True,
                            activation=output_activation,
                            kernel_regularizer=rnn_reg,
-                           kernel_initializer=rnn_initializer)(resh_hidden_2)
+                           kernel_initializer=rnn_initializer,
+                           use_bias=True)(resh_hidden_2)
     model = keras.models.Model(ilayer, rnn)
 
     optimizer = optimizers.adam(optim_learning_rate)
