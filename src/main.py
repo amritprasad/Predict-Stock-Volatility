@@ -258,11 +258,11 @@ negative_words = ['LOSS', 'LOSSES', 'CLAIMS', 'IMPAIRMENT', 'AGAINST',
                   'TERMINATED', 'IMPAIRED', 'COMPLAINT', 'DEFAULT',
                   'NEGATIVE', 'DEFENDANTS', 'PLAINTIFFS', 'DIFFICULT']
 uncertain_words = uncert_words_list
-scrape_these_words(key_words =positive_words ,path = "../../Data",
-                       file_name = "positive_words_2000.csv")
+scrape_these_words(key_words =positive_words[:5] ,path = "../../Data",
+                       file_name = "positive_words_2000_v2.csv")
+
+scrape_these_words(key_words =negative_words[:5] ,path = "../../Data",
+                       file_name = "negative_words_2000_v2.csv")
 
 scrape_these_words(key_words =negative_words ,path = "../../Data",
-                       file_name = "negative_words_2000.csv")
-
-scrape_these_words(key_words =negative_words ,path = "../../Data",
-                       file_name = "uncertain_words_2000.csv")
+                       file_name = "uncertain_words_2000_v2.csv")

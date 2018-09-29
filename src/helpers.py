@@ -410,9 +410,21 @@ def google_trends(keyword_list=["Blockchain"],cat= 12,
     from pytrends.request import TrendReq        
     pytrends = TrendReq(hl='en-US',tz=360)
     #kw_list = ["Blockchain"]
-    pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe=time_frame,
+    pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe="2004-01-01 2007-12-31",
                            geo=geo, gprop='')
-    df=pytrends.interest_over_time()
+    df1=pytrends.interest_over_time()
+    
+    pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe="2008-01-01 2012-12-31",
+                           geo=geo, gprop='')
+    df2=pytrends.interest_over_time()
+    
+    pytrends.build_payload(kw_list=keyword_list,cat=cat, timeframe="2013-01-01 2017-12-31",
+                           geo=geo, gprop='')
+    df3=pytrends.interest_over_time()
+    
+    df = pd.concat([df1,df2,df3])
+    df.index  = df.index.shift(-2,"1D")
+    
     if make_plot == True:
         print("Your Download looks like:")
         df.plot.line()
