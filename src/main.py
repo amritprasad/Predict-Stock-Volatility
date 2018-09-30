@@ -62,16 +62,18 @@ regression_df = regression_df.merge(temp_df, left_index=True,
 print('Checking how clean the regression_df is.\nFollowing is the no. of NAs-')
 print(regression_df.isna().sum())
 regression_df.dropna(inplace=True)
-y = regression_df['Variance'].values[1:]
-X = regression_df[['Variance', 'Innovations_Squared']].values[:-1]
+y = regression_df['Variance'].values[1:].copy()
+X = regression_df[['Variance', 'Innovations_Squared']].values[:-1].copy()
 X = sm.add_constant(X)
 #%%
 ###############################################################################
 ## B. Variance Series Smoothing, and Baselining
 ###############################################################################
-num_points = y.size
-train_idx = int(num_points*0.6)
-cv_idx = int(num_points*0.85)
+train_end_date = pd.to_datetime('2010-10-22')
+cv_end_date = pd.to_datetime('2015-04-17')
+test_end_date = pd.to_datetime('2017-12-29')
+train_idx = sum(regression_df.index[1:] <= train_end_date)
+cv_idx = sum(regression_df.index[1:] <= cv_end_date)
 X_train, y_train = X[:train_idx], y[:train_idx]
 X_cv, y_cv = X[train_idx:cv_idx], y[train_idx:cv_idx]
 X_test, y_test = X[cv_idx:], y[cv_idx:]
@@ -102,11 +104,12 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 #2) Lagged Innovations
 #3) Time to Expiry
 #4) Volume
+#5) Open Interest Call/Put
 train_dates = dates[:train_idx]
 train_date_end = train_dates[-1]
 cols_to_normalize = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME']
 regression_df = feature_normalization(regression_df, cols_to_normalize,
-                                      train_date_end, scale_down=1)
+                                      train_date_end, scale_down=100)
 time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
 #time_exp = regression_df['Time_to_Expiry'].values[:-1]
 scale_factor = 1
@@ -114,13 +117,13 @@ lag_innov = np.sqrt(X[:, 1])
 #lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
 lag_innov = np.column_stack((lag_innov,
                              regression_df['Innovations'].values[:-1]))
-lag_innov = np.column_stack((lag_innov,
-                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
 lag_innov = np.column_stack((lag_innov,
                              regression_df['OPEN_INT_TOTAL_CALL'].values[:-1]))
-lag_innov = np.column_stack((lag_innov,
-                             regression_df['PX_VOLUME'].values[:-1]))
-lag_innov = np.column_stack((lag_innov, time_exp))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['PX_VOLUME'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov, time_exp))
 num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
 args_dict = {
@@ -143,19 +146,32 @@ from neural_network_module import *
 jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
                                                       scale_factor,
                                                       train_idx, cv_idx,
-                                                      batch_size=64,
-                                                      epochs=3000,
+                                                      batch_size=256,
+                                                      epochs=10000,
                                                       plot_flag=False,
                                                       jnn_isize=num_nn_inputs,
                                                       args_dict=args_dict)
+#Plot Loss vs Epochs
+plt.clf()
+plt.rcParams["figure.figsize"] = (10, 8)
+jnn_history = jnn_trained.history
+plot_epochs, plot_loss = [], []
+for idx, y in enumerate(jnn_history.history['loss']):
+    if y < 1e-4:
+        plot_loss.append(y*1E5)
+        plot_epochs.append(jnn_history.epoch[idx])
+plt.plot(plot_epochs, plot_loss, label="Loss vs Epochs")
+plt.grid(True)
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
 jnn_weights = jnn_trained.get_weights()
 # Plot Benchmark against Realized Vol for trained series
 y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
                                  "Std Dev"].values
 plt.rcParams["figure.figsize"] = (15, 10)
-plt.plot(train_dates, y_train_true, label = "Realized Volatilty")
-plt.plot(train_dates, y_train_benchmark, label = "GARCH (benchmark)")
-plt.plot(train_dates, nn_fit_vol, label = "Latest State of the Art",
+plt.plot(train_dates, y_train_true, label="Realized Volatilty")
+plt.plot(train_dates, y_train_benchmark, label="GARCH (benchmark)")
+plt.plot(train_dates, nn_fit_vol, label="Latest State of the Art",
          marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
@@ -235,8 +251,12 @@ nn_df.to_csv('NN Performance.csv')
 ## C. Feature Creation
 ## b. NLP Data Feature Creation
 ###############################################
-
-
+predict_proba = pd.read_csv("../../Data/predict_proba.csv")
+predict_proba['Date'] = pd.to_datetime(predict_proba['Date'])
+predict_proba_train = predict_proba[predict_proba['Date'].isin(train_dates)]
+predict_proba_train = predict_proba_train['avg_neg_proba'].values
+predict_proba_cv = predict_proba[predict_proba['Date'].isin(forecast_dates)]
+predict_proba_cv = predict_proba_cv['avg_neg_proba'].values
 ###############################################
 ## C. Feature Creation
 ## c. NLP Data Feature Creation
