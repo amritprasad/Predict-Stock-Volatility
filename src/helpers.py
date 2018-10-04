@@ -365,7 +365,7 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     return model_df
 # %%
 #Feature Engineering
-def feature_normalization(df, col_names, train_date_end, scale_down=1,
+def feature_normalization(_df, col_names, train_date_end, scale_down=1,
                           percentile_flag=False):
     '''
     Implement z-score normalization using the mean and std-dev of the training
@@ -373,6 +373,7 @@ def feature_normalization(df, col_names, train_date_end, scale_down=1,
     '''
     #df, col_names = regression_df.copy(), ['PUT_CALL_VOLUME_RATIO_CUR_DAY',
     #                                       'PX_VOLUME', 'Time_to_Expiry']
+    df = _df.copy()
     for col in col_names:
         filter_train = df['Dates'] <= train_date_end
         train_data = df[col][filter_train]
@@ -387,6 +388,18 @@ def feature_normalization(df, col_names, train_date_end, scale_down=1,
     
     df[col_names] = df[col_names]/scale_down
     
+    return df
+
+def google_trends_features(_df, cols, window=6):
+    '''
+    Provides difference between moving average and current word count
+    '''
+    #df, cols = trends_df.copy(), trends_df.columns
+    df = _df.copy()
+    for col in cols:
+        rolling_mean = df[col].rolling(window=window).mean().shift(1)
+        df[col+"_change"] = df[col] - rolling_mean
+        
     return df
 # %%
 ###############################################################################

@@ -26,6 +26,14 @@ spx_data_df = pd.read_excel('../../Data/Data_Dump_BBG.xlsx',
                             sheet_name='SPX Index', skiprows=4)
 price_history_df = pd.read_excel('../../Data/Data_Dump_BBG.xlsx',
                                  sheet_name='Price History', skiprows=3)
+trends_df = pd.read_csv('../../Data/trends_papers.csv')
+#Process Google Trends data
+trends_df.rename(columns={'date':'Dates'}, inplace=True)
+trends_df['Dates'] = pd.to_datetime(trends_df['Dates'])
+trends_df.set_index('Dates', inplace=True)
+cols_to_process = trends_df.columns
+trends_df = google_trends_features(trends_df, cols_to_process, window=6)
+
 price_history_df.drop(index=[0,1], inplace=True)
 price_history_df.rename(columns={price_history_df.columns[0]: 'Dates'},
                                  inplace=True)
@@ -99,15 +107,21 @@ y_cv_naive = np.mean(np.sqrt(y_train))
 # B.3. Neural Network calculations
 ###############################################################################
 #Fit NN to training data
-#Latest Features' List
-#1) Lagged Vol
-#2) Lagged Innovations
-#3) Time to Expiry
-#4) Volume
-#5) Open Interest Call/Put
+#Combine regression_df with Google trends Data
+regression_df = pd.merge(regression_df, trends_df, left_index=True,
+                         right_index=True, how='outer')
+#BackFill Google Trends
+modes = trends_df.loc[trends_df.index.isin(dates[:train_idx])].mode()
+modes = modes.to_dict('records')[0]
+#regression_df.update(regression_df[trends_df.columns].fillna(modes))
+regression_df.update(regression_df[trends_df.columns].fillna(0))
+#Continue Feature Engineering
+regression_df['down_returns'] = [min(x, 0) for x in regression_df['Returns']]
+regression_df['down_innov'] = [min(x, 0) for x in regression_df['Innovations']]
 train_dates = dates[:train_idx]
 train_date_end = train_dates[-1]
-cols_to_normalize = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME']
+cols_to_normalize = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME',
+                     'stocks_change', 'down_returns']
 regression_df = feature_normalization(regression_df, cols_to_normalize,
                                       train_date_end, scale_down=100,
                                       percentile_flag=True)
@@ -116,14 +130,16 @@ std_dev = feature_normalization(regression_df, ['Std Dev'],
                                 percentile_flag=True)
 time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
 #time_exp = regression_df['Time_to_Expiry'].values[:-1]
-downside_returns = regression_df['Returns'].values[:-1]
-downside_returns = np.array([min(x, 0) for x in downside_returns])
+#downside_returns = regression_df['Returns'].values[:-1]
+#downside_returns = np.array([min(x, 0) for x in downside_returns])
 scale_factor = 1E2
 lag_innov = np.sqrt(X[:, 1])
 #lag_innov = np.column_stack((lag_innov, std_dev['Std Dev'].values[:-1]))
 #lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
 #lag_innov = np.column_stack((lag_innov,
 #                             regression_df['Innovations'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['down_innov'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov,
 #                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov,
@@ -132,13 +148,19 @@ lag_innov = np.sqrt(X[:, 1])
 #                             regression_df['PX_VOLUME'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov, time_exp))
 #lag_innov = np.column_stack((lag_innov, downside_returns))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['down_returns'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['stocks_change'].values[:-1]))
 num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
-num_epochs, batch_size, learning_rate = 50000, train_idx, 0.012
+num_epochs, batch_size, learning_rate = 30000, train_idx, 0.008
 args_dict = {
              'hidden_initializer': keras.initializers.he_normal(seed=42),
+             #'hidden_initializer': keras.initializers.he_normal(seed=42),
              'dropout_rate': 0.,
              'rnn_initializer': keras.initializers.he_normal(seed=42),
+             #'rnn_initializer': 'he_normal',
              'optim_learning_rate': learning_rate,
              'loss': 'mean_squared_error',
              #'loss': custom_error,
@@ -179,11 +201,13 @@ for idx, loss in enumerate(jnn_history.history['loss']):
     plot_loss.append(loss*1E5)
     plot_epochs.append(jnn_history.epoch[idx])
 plt.plot(plot_epochs[1000:], plot_loss[1000:], label="Loss vs Epochs")
+#plt.plot(plot_epochs, plot_loss, label="Loss vs Epochs")
 plt.grid(True)
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 title_str = 'Epochs- '+str(num_epochs)+', Batch- '+str(batch_size)+', lr- '+str(learning_rate)
 plt.title(title_str)
+#plt.savefig('')
 jnn_weights = jnn_trained.get_weights()
 jnn_inputs = [np.reshape(lag_innov[:train_idx], (train_idx, num_nn_inputs)),
               np.reshape(innov[:train_idx], (train_idx, 1, 1)), [1], 0]
@@ -208,7 +232,7 @@ forecast_dates = dates[train_idx:cv_idx]
 y_cv_true = regression_df.loc[regression_df["Dates"].isin(forecast_dates),
                               "Std Dev"].values
 plt.clf()
-plt.rcParams["figure.figsize"] = (15, 10)
+plt.rcParams["figure.figsize"] = (10, 8)
 plt.plot(forecast_dates, y_cv_true, label = "Realized Volatilty")
 plt.plot(forecast_dates, y_cv_benchmark, label = "GARCH (benchmark)",
          marker='.')

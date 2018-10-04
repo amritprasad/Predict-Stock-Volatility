@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from numpy.random import seed
 from tensorflow import set_random_seed
 import tensorflow as tf
+import random as rn
 
 
 def run_jnn(lag_innov, innov, scale_factor,
@@ -25,6 +26,7 @@ def run_jnn(lag_innov, innov, scale_factor,
     '''
     seed(42)
     set_random_seed(42)
+    rn.seed(42)
     
     x_train, x_cv = lag_innov[:train_idx], lag_innov[train_idx:cv_idx]
     y_train, y_cv = innov[:train_idx], innov[train_idx:cv_idx]
@@ -143,23 +145,27 @@ def build_jnn(input_len, args_dict):
     rnn_bias_reg = keras.regularizers.l1_l2(l1=rnn_reg_b_l1, l2=rnn_reg_b_l2)
     
     ilayer = layers.Input(shape=(input_len,))
-    #batch_norm_i = layers.BatchNormalization(mode=0, axis=1)(ilayer)
+    #layer_norm_i = layers.Lambda(layer_norm)(ilayer)
+    batch_norm_i = layers.BatchNormalization(axis=1)(ilayer)
     hidden_1 = layers.Dense(2, kernel_initializer=hidden_initializer,
                             #kernel_regularizer=hidden_reg_1,
-                            activation=hidden_activation,
+                            activation='tanh',
                             #bias_regularizer=hidden_bias_reg_1
-                           )(ilayer)
+                           )(batch_norm_i)
+    #elu_h_1 = layers.ELU(alpha=1.)(hidden_1)
+    batch_norm_h_1 = layers.BatchNormalization(axis=1)(hidden_1)
     #layer_norm_1 = layers.Lambda(layer_norm)(hidden_1)
-    #drop_1 = layers.Dropout(dropout_rate, seed=42)(layer_norm_1)
-    drop_1 = layers.Dropout(dropout_rate, seed=42)(hidden_1)
+    #drop_1 = layers.Dropout(dropout_rate, seed=42)(batch_norm_h_1)
+    #drop_1 = layers.Dropout(dropout_rate, seed=42)(elu_h_1)
     #resh_hidden_1 = layers.Reshape((1, 2))(layer_norm_1)
-    resh_hidden_1 = layers.Reshape((1, 2))(drop_1)
-    #resh_hidden_1 = layers.Reshape((1, 2))(hidden_1)
+    resh_hidden_1 = layers.Reshape((1, 2))(batch_norm_h_1)
+    #resh_hidden_1 = layers.Reshape((1, 2))(drop_1)
     hidden_2 = layers.Dense(2, kernel_initializer=hidden_initializer,
                             #kernel_regularizer=hidden_reg_2,
-                            activation=hidden_activation,
+                            activation='tanh',
                             #bias_regularizer=hidden_bias_reg_2
                            )(resh_hidden_1)
+    #elu_h_2 = layers.ELU(alpha=1.)(hidden_2)
     #layer_norm_2 = layers.Lambda(layer_norm)(hidden_2)
     #drop_2 = layers.Dropout(dropout_rate, seed=42)(layer_norm_2)
     #drop_2 = layers.Dropout(dropout_rate, seed=42)(hidden_2)
