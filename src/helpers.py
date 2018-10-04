@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 #from arch.univariate import GARCH,ARX
 import bisect
 import time
+from scipy.stats import percentileofscore
 #from pytrends.request import TrendReq
 #%%
 
@@ -364,7 +365,8 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     return model_df
 # %%
 #Feature Engineering
-def feature_normalization(df, col_names, train_date_end, scale_down=1):
+def feature_normalization(df, col_names, train_date_end, scale_down=1,
+                          percentile_flag=False):
     '''
     Implement z-score normalization using the mean and std-dev of the training
     data
@@ -373,9 +375,15 @@ def feature_normalization(df, col_names, train_date_end, scale_down=1):
     #                                       'PX_VOLUME', 'Time_to_Expiry']
     for col in col_names:
         filter_train = df['Dates'] <= train_date_end
-        mu = np.nanmean(df[col][filter_train])
-        std_dev = np.nanstd(df[col][filter_train], ddof=1)
-        df[col] = (df[col] - mu)/std_dev
+        train_data = df[col][filter_train]
+        if percentile_flag:
+            df[col] = df.apply(lambda x: percentileofscore(sorted(train_data),
+                                                           x[col]),
+                               axis='columns')
+        else:
+            mu = np.nanmean(train_data)
+            std_dev = np.nanstd(train_data, ddof=1)
+            df[col] = (df[col] - mu)/std_dev
     
     df[col_names] = df[col_names]/scale_down
     

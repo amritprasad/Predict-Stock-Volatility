@@ -126,6 +126,8 @@ def build_jnn(input_len, args_dict):
     hidden_reg_b_l2_1 = args_dict['hidden_reg_b_l2_1']
     hidden_reg_b_l1_2 = args_dict['hidden_reg_b_l1_2']
     hidden_reg_b_l2_2 = args_dict['hidden_reg_b_l2_2']
+    rnn_reg_b_l1 = args_dict['rnn_reg_b_l1']
+    rnn_reg_b_l2 = args_dict['rnn_reg_b_l2']
     
     hidden_reg_1 = keras.regularizers.l1_l2(l1=hidden_reg_l1_1,
                                             l2=hidden_reg_l2_1)
@@ -138,38 +140,49 @@ def build_jnn(input_len, args_dict):
     rnn_reg = keras.regularizers.l1_l2(l1=output_reg_l1, l2=output_reg_l2)
     recurrent_reg = keras.regularizers.l1_l2(l1=rec_reg_l1,
                                              l2=rec_reg_l2)
+    rnn_bias_reg = keras.regularizers.l1_l2(l1=rnn_reg_b_l1, l2=rnn_reg_b_l2)
+    
     ilayer = layers.Input(shape=(input_len,))
     #batch_norm_i = layers.BatchNormalization(mode=0, axis=1)(ilayer)
     hidden_1 = layers.Dense(2, kernel_initializer=hidden_initializer,
-                            kernel_regularizer=hidden_reg_1,
+                            #kernel_regularizer=hidden_reg_1,
                             activation=hidden_activation,
-                            bias_regularizer=hidden_bias_reg_1
+                            #bias_regularizer=hidden_bias_reg_1
                            )(ilayer)
     #layer_norm_1 = layers.Lambda(layer_norm)(hidden_1)
     #drop_1 = layers.Dropout(dropout_rate, seed=42)(layer_norm_1)
-    #drop_1 = layers.Dropout(dropout_rate, seed=42)(hidden_1)
+    drop_1 = layers.Dropout(dropout_rate, seed=42)(hidden_1)
     #resh_hidden_1 = layers.Reshape((1, 2))(layer_norm_1)
-    resh_hidden_1 = layers.Reshape((1, 2))(hidden_1)
+    resh_hidden_1 = layers.Reshape((1, 2))(drop_1)
+    #resh_hidden_1 = layers.Reshape((1, 2))(hidden_1)
     hidden_2 = layers.Dense(2, kernel_initializer=hidden_initializer,
-                            kernel_regularizer=hidden_reg_2,
+                            #kernel_regularizer=hidden_reg_2,
                             activation=hidden_activation,
-                            bias_regularizer=hidden_bias_reg_2
+                            #bias_regularizer=hidden_bias_reg_2
                            )(resh_hidden_1)
     #layer_norm_2 = layers.Lambda(layer_norm)(hidden_2)
     #drop_2 = layers.Dropout(dropout_rate, seed=42)(layer_norm_2)
     #drop_2 = layers.Dropout(dropout_rate, seed=42)(hidden_2)
+    #resh_hidden_2 = layers.Reshape((1, 2))(layer_norm_2)
     resh_hidden_2 = layers.Reshape((1, 2))(hidden_2)
     rnn = layers.SimpleRNN(1,
                            return_sequences=True,
                            activation=output_activation,
                            kernel_regularizer=rnn_reg,
                            kernel_initializer=rnn_initializer,
-                           use_bias=True)(resh_hidden_2)
+                           use_bias=True,
+                           #recurrent_regularizer=recurrent_reg,
+                           #bias_regularizer=rnn_bias_reg
+                          )(resh_hidden_2)
     model = keras.models.Model(ilayer, rnn)
 
-    optimizer = optimizers.adam(optim_learning_rate,
-                                #epsilon=1e-5
-                               )
+    #optimizer = optimizers.adam(optim_learning_rate,
+                                 #epsilon=1e-5
+    #                            )
+    optimizer = optimizers.RMSprop(optim_learning_rate,
+                                   #epsilon=1e-5
+                                  )
+#     optimizer = optimizers.SGD(optim_learning_rate)
     model.compile(optimizer=optimizer,
                   loss=loss
                   #loss=custom_error
@@ -183,6 +196,19 @@ def train_jnn(model, x_train, y_train, epochs=5, batch_size=100):
 
 def custom_error(y_true, y_pred):
     return K.sum(K.square(y_true - y_pred), axis=0)
+
+def get_model_gradients(model, inputs):
+    weights = [tensor for tensor in model.trainable_weights]
+    optimizer = model.optimizer
+    
+    gradients = optimizer.get_gradients(model.total_loss, weights)
+    input_tensors = [model.inputs[0], #input data
+                     model.targets[0], #target data
+                     model.sample_weights[0], #set to [1] for full weighting
+                     K.learning_phase() #test=0, train=1
+                     ]
+    get_gradients = K.function(inputs=input_tensors, outputs=gradients)
+    return get_gradients(inputs)
 
 ###############################################################################
 #FFN
@@ -242,6 +268,7 @@ def build_ffn(input_len, args_dict):
     #model.add(SimpleRNN(1, return_sequences=True,
     #                    kernel_initializer='he_normal', activation='linear'))
     
+    #optimizer = optimizers.SGD(learning_rate)
     optimizer = optimizers.adam(learning_rate)
     model.compile(optimizer=optimizer,
                   loss='mean_squared_error'
@@ -252,7 +279,7 @@ def build_ffn(input_len, args_dict):
 def train_ffn(model, x_train, y_train, epochs=5, batch_size=100):
     model.fit(x_train, y_train, 
               epochs=epochs, batch_size=batch_size,
-              verbose=1, shuffle=False)
+              verbose=1, shuffle=False)    
 # %%
 
 # %%

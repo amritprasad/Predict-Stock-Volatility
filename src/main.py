@@ -109,28 +109,37 @@ train_dates = dates[:train_idx]
 train_date_end = train_dates[-1]
 cols_to_normalize = ['OPEN_INT_TOTAL_PUT', 'OPEN_INT_TOTAL_CALL', 'PX_VOLUME']
 regression_df = feature_normalization(regression_df, cols_to_normalize,
-                                      train_date_end, scale_down=100)
+                                      train_date_end, scale_down=100,
+                                      percentile_flag=True)
+std_dev = feature_normalization(regression_df, ['Std Dev'],
+                                train_date_end, scale_down=100,
+                                percentile_flag=True)
 time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
 #time_exp = regression_df['Time_to_Expiry'].values[:-1]
-scale_factor = 1
+downside_returns = regression_df['Returns'].values[:-1]
+downside_returns = np.array([min(x, 0) for x in downside_returns])
+scale_factor = 1E2
 lag_innov = np.sqrt(X[:, 1])
+#lag_innov = np.column_stack((lag_innov, std_dev['Std Dev'].values[:-1]))
 #lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
-lag_innov = np.column_stack((lag_innov,
-                             regression_df['Innovations'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['Innovations'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov,
 #                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
-lag_innov = np.column_stack((lag_innov,
-                             regression_df['OPEN_INT_TOTAL_CALL'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['OPEN_INT_TOTAL_CALL'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov,
 #                             regression_df['PX_VOLUME'].values[:-1]))
 #lag_innov = np.column_stack((lag_innov, time_exp))
+#lag_innov = np.column_stack((lag_innov, downside_returns))
 num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
 innov = np.sqrt(y)
+num_epochs, batch_size, learning_rate = 50000, train_idx, 0.012
 args_dict = {
-             'hidden_initializer': 'he_normal',
+             'hidden_initializer': keras.initializers.he_normal(seed=42),
              'dropout_rate': 0.,
-             'rnn_initializer': 'he_normal',
-             'optim_learning_rate': 0.005,
+             'rnn_initializer': keras.initializers.he_normal(seed=42),
+             'optim_learning_rate': learning_rate,
              'loss': 'mean_squared_error',
              #'loss': custom_error,
              'hidden_reg_l1_1': 0.,
@@ -140,14 +149,23 @@ args_dict = {
              'output_reg_l1': 0.,
              'output_reg_l2': 0.,
              'hidden_activation': ELU(alpha=1.),
-             'output_activation': 'linear'
+             #'hidden_activation': PReLU(),
+             'output_activation': 'linear',
+             'recurrent_reg_l1': 0.,
+             'recurrent_reg_l2': 0.,
+             'hidden_reg_b_l1_1': 0.,
+             'hidden_reg_b_l2_1': 0.,
+             'hidden_reg_b_l1_2': 0.,
+             'hidden_reg_b_l2_2': 0.,
+             'rnn_reg_b_l1': 0.,
+             'rnn_reg_b_l2': 0.
             }
 from neural_network_module import *
 jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
                                                       scale_factor,
                                                       train_idx, cv_idx,
-                                                      batch_size=256,
-                                                      epochs=10000,
+                                                      batch_size=batch_size,
+                                                      epochs=num_epochs,
                                                       plot_flag=False,
                                                       jnn_isize=num_nn_inputs,
                                                       args_dict=args_dict)
@@ -156,19 +174,24 @@ plt.clf()
 plt.rcParams["figure.figsize"] = (10, 8)
 jnn_history = jnn_trained.history
 plot_epochs, plot_loss = [], []
-for idx, y in enumerate(jnn_history.history['loss']):
-    if y < 1e-4:
-        plot_loss.append(y*1E5)
-        plot_epochs.append(jnn_history.epoch[idx])
-plt.plot(plot_epochs, plot_loss, label="Loss vs Epochs")
+for idx, loss in enumerate(jnn_history.history['loss']):
+#    if loss < 1e-4:
+    plot_loss.append(loss*1E5)
+    plot_epochs.append(jnn_history.epoch[idx])
+plt.plot(plot_epochs[1000:], plot_loss[1000:], label="Loss vs Epochs")
 plt.grid(True)
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
+title_str = 'Epochs- '+str(num_epochs)+', Batch- '+str(batch_size)+', lr- '+str(learning_rate)
+plt.title(title_str)
 jnn_weights = jnn_trained.get_weights()
+jnn_inputs = [np.reshape(lag_innov[:train_idx], (train_idx, num_nn_inputs)),
+              np.reshape(innov[:train_idx], (train_idx, 1, 1)), [1], 0]
+get_model_gradients(jnn_trained, jnn_inputs)
 # Plot Benchmark against Realized Vol for trained series
 y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
                                  "Std Dev"].values
-plt.rcParams["figure.figsize"] = (15, 10)
+plt.rcParams["figure.figsize"] = (10, 8)
 plt.plot(train_dates, y_train_true, label="Realized Volatilty")
 plt.plot(train_dates, y_train_benchmark, label="GARCH (benchmark)")
 plt.plot(train_dates, nn_fit_vol, label="Latest State of the Art",
