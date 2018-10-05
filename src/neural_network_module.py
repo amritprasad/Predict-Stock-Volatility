@@ -4,10 +4,9 @@ Author: Nathan Johnson
 Date: 9/21/2018
 """
 import keras
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout, Reshape, SimpleRNN, Lambda, Activation
-from keras import layers
-from keras import optimizers
+from keras import layers, optimizers
 import keras.backend as K
 from keras.layers.advanced_activations import ELU
 import numpy as np
@@ -144,10 +143,13 @@ def build_jnn(input_len, args_dict):
                                              l2=rec_reg_l2)
     rnn_bias_reg = keras.regularizers.l1_l2(l1=rnn_reg_b_l1, l2=rnn_reg_b_l2)
     
+    #Define NN architecture
+    h1_len, h2_len = 3, 2
+    
     ilayer = layers.Input(shape=(input_len,))
     #layer_norm_i = layers.Lambda(layer_norm)(ilayer)
     batch_norm_i = layers.BatchNormalization(axis=1)(ilayer)
-    hidden_1 = layers.Dense(2, kernel_initializer=hidden_initializer,
+    hidden_1 = layers.Dense(h1_len, kernel_initializer=hidden_initializer,
                             #kernel_regularizer=hidden_reg_1,
                             activation='tanh',
                             #bias_regularizer=hidden_bias_reg_1
@@ -158,19 +160,20 @@ def build_jnn(input_len, args_dict):
     #drop_1 = layers.Dropout(dropout_rate, seed=42)(batch_norm_h_1)
     #drop_1 = layers.Dropout(dropout_rate, seed=42)(elu_h_1)
     #resh_hidden_1 = layers.Reshape((1, 2))(layer_norm_1)
-    resh_hidden_1 = layers.Reshape((1, 2))(batch_norm_h_1)
-    #resh_hidden_1 = layers.Reshape((1, 2))(drop_1)
-    hidden_2 = layers.Dense(2, kernel_initializer=hidden_initializer,
+    #resh_hidden_1 = layers.Reshape((1, 5))(batch_norm_h_1)
+    resh_hidden_1 = layers.Reshape((1, h1_len))(batch_norm_h_1)
+    hidden_2 = layers.Dense(h2_len, kernel_initializer=hidden_initializer,
                             #kernel_regularizer=hidden_reg_2,
                             activation='tanh',
                             #bias_regularizer=hidden_bias_reg_2
                            )(resh_hidden_1)
+    batch_norm_h_2 = layers.BatchNormalization(axis=1)(hidden_2)
     #elu_h_2 = layers.ELU(alpha=1.)(hidden_2)
     #layer_norm_2 = layers.Lambda(layer_norm)(hidden_2)
-    #drop_2 = layers.Dropout(dropout_rate, seed=42)(layer_norm_2)
+    #drop_2 = layers.Dropout(dropout_rate, seed=42)(batch_norm_h_2)
     #drop_2 = layers.Dropout(dropout_rate, seed=42)(hidden_2)
     #resh_hidden_2 = layers.Reshape((1, 2))(layer_norm_2)
-    resh_hidden_2 = layers.Reshape((1, 2))(hidden_2)
+    resh_hidden_2 = layers.Reshape((1, h2_len))(batch_norm_h_2)
     rnn = layers.SimpleRNN(1,
                            return_sequences=True,
                            activation=output_activation,

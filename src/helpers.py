@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import bisect
 import time
 from scipy.stats import percentileofscore
+from sklearn.decomposition import PCA
 #from pytrends.request import TrendReq
 #%%
 
@@ -149,7 +150,7 @@ def calc_imp_vol(premium, option_params):
     sigma_imp = opt_res.x[0]
     return sigma_imp
 
-def options_implied_vol_data_clean(data_df):
+def options_implied_vol_data_clean(data_df, weekly_flag=False):
     '''
     Clean the options' implied vol data
     '''
@@ -158,7 +159,12 @@ def options_implied_vol_data_clean(data_df):
                        'impl_volatility', 'delta', 'optionid']
     data_df = data_df[columns_to_keep]
     # Convert date columns to pandas datetime
-    datetype_columns = ['date', 'exdate', 'last_date']
+    if np.logical_not(weekly_flag):
+        datetype_columns = ['date', 'exdate', 'last_date']
+    else:
+        datetype_columns = ['exdate', 'last_date']
+        data_df['date'] = pd.to_datetime(data_df['date'], yearfirst=True,
+                                         format='%Y-%m-%d')
     for date_col in datetype_columns:
         data_df[date_col] = pd.to_datetime(data_df[date_col], yearfirst=True,
                                            format='%Y%m%d')
@@ -389,6 +395,25 @@ def feature_normalization(_df, col_names, train_date_end, scale_down=1,
     df[col_names] = df[col_names]/scale_down
     
     return df
+
+def reduce_features_gtrends(best_perf_words, _regression_df, train_idx,
+                            per_explain_var=80):
+    '''
+    Reduce the number of Google Trends features
+    '''
+    #best_perf_words = ['plunges', 'S&P', 'VIX', 'drop', 'rise', 'stocks']
+    regression_df = _regression_df.copy()
+    best_perf_cols = [x+'_change' for x in best_perf_words]
+    pca = PCA(len(best_perf_cols))
+    gtrends_arr = regression_df[best_perf_cols][:-1]
+    gtrends_arr_train = gtrends_arr[:train_idx].values
+    pca.fit(gtrends_arr_train)
+    cumulative_var = np.cumsum(pca.explained_variance_ratio_)*100
+    num_components = bisect.bisect_left(cumulative_var, per_explain_var)+1
+    comp_weights = pca.components_[:num_components]
+    pca_gtrends_arr = gtrends_arr @ comp_weights.T
+    
+    return pca_gtrends_arr
 
 def google_trends_features(_df, cols, window=6):
     '''

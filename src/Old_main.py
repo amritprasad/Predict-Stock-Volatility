@@ -141,6 +141,200 @@ std_dev = feature_normalization(regression_df, ['Std Dev'],
                                 train_date_end, scale_down=100,
                                 percentile_flag=True)
 # %%
+###############################################################################
+#No need to run the below if model already trained
+###############################################################################
+time_exp = (regression_df['Time_to_Expiry'].values[:-1]-14)/1400
+#time_exp = regression_df['Time_to_Expiry'].values[:-1]
+#downside_returns = regression_df['Returns'].values[:-1]
+#downside_returns = np.array([min(x, 0) for x in downside_returns])
+scale_factor = 1E2
+lag_innov = np.sqrt(X[:, 1])
+#lag_innov = np.column_stack((lag_innov, pca_gtrends_arr))
+#lag_innov = np.column_stack((lag_innov, std_dev['Std Dev'].values[:-1]))
+#lag_innov = np.stack((np.sqrt(X[:, 1]), X[:, 2])).T
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['Innovations'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['down_innov'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['OPEN_INT_TOTAL_PUT'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['OPEN_INT_TOTAL_CALL'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['PX_VOLUME'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov, time_exp))
+#lag_innov = np.column_stack((lag_innov, downside_returns))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['plunges_change'].values[:-1]))
+lag_innov = np.column_stack((lag_innov,
+                             regression_df['stocks_change'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['VIX_change'].values[:-1]))
+#lag_innov = np.column_stack((lag_innov,
+#                             regression_df['avg_neg_proba'].values[:-1]))
+num_nn_inputs = lag_innov.shape[1] if lag_innov.ndim > 1 else 1
+innov = np.sqrt(y)
+num_epochs, batch_size, learning_rate = 30000, train_idx, 0.008
+args_dict = {
+             'hidden_initializer': keras.initializers.he_normal(seed=42),
+             #'hidden_initializer': keras.initializers.he_normal(seed=42),
+             'dropout_rate': 0.2,
+             'rnn_initializer': keras.initializers.he_normal(seed=42),
+             #'rnn_initializer': 'he_normal',
+             'optim_learning_rate': learning_rate,
+             'loss': 'mean_squared_error',
+             #'loss': custom_error,
+             'hidden_reg_l1_1': 0.,
+             'hidden_reg_l2_1': 0.,
+             'hidden_reg_l1_2': 0.,
+             'hidden_reg_l2_2': 0.,
+             'output_reg_l1': 0.,
+             'output_reg_l2': 0.,
+             'hidden_activation': ELU(alpha=1.),
+             #'hidden_activation': PReLU(),
+             'output_activation': 'linear',
+             'recurrent_reg_l1': 0.,
+             'recurrent_reg_l2': 0.,
+             'hidden_reg_b_l1_1': 0.,
+             'hidden_reg_b_l2_1': 0.,
+             'hidden_reg_b_l1_2': 0.,
+             'hidden_reg_b_l2_2': 0.,
+             'rnn_reg_b_l1': 0.,
+             'rnn_reg_b_l2': 0.
+            }
+from neural_network_module import *
+jnn_trained, nn_fit_vol, nn_forecast_vol, _ = run_jnn(lag_innov, innov,
+                                                      scale_factor,
+                                                      train_idx, cv_idx,
+                                                      batch_size=batch_size,
+                                                      epochs=num_epochs,
+                                                      plot_flag=False,
+                                                      jnn_isize=num_nn_inputs,
+                                                      args_dict=args_dict)
+#Plot Loss vs Epochs
+plt.clf()
+plt.rcParams["figure.figsize"] = (10, 8)
+jnn_history = jnn_trained.history
+plot_epochs, plot_loss = [], []
+for idx, loss in enumerate(jnn_history.history['loss']):
+#    if loss < 1e-4:
+    plot_loss.append(loss*1E5)
+    plot_epochs.append(jnn_history.epoch[idx])
+#plt.plot(plot_epochs[1000:], plot_loss[1000:], label="Loss vs Epochs")
+plt.plot(plot_epochs, plot_loss, label="Loss vs Epochs")
+plt.grid(True)
+plt.xlabel('Epochs')
+plt.ylabel('Scaled Loss')
+#plt.yticks(np.linspace(25000, max(plot_epochs[1000:]), 10))
+#title_str = 'Epochs- '+str(num_epochs)+', Batch- '+str(batch_size)+', lr- '+str(learning_rate)
+title_str = 'Volatility + Volume + Stock Change'
+plt.title(title_str)
+#plt.savefig('')
+jnn_weights = jnn_trained.get_weights()
+jnn_inputs = [np.reshape(lag_innov[:train_idx], (train_idx, num_nn_inputs)),
+              np.reshape(innov[:train_idx], (train_idx, 1, 1)), [1], 0]
+get_model_gradients(jnn_trained, jnn_inputs)
+# %%
+try:
+    jnn_trained
+except NameError:
+    filename = "../../Implementation/NN Analysis/Vol_Volume_stock.h5"
+    jnn_trained = load_model(filename)
+    scale_factor = 1E2
+    input_ = np.sqrt(X[:, 1])
+    input_ = np.column_stack((input_,
+                              regression_df['stocks_change'].values[:-1]))
+    input_ = np.column_stack((input_,
+                              regression_df['PX_VOLUME'].values[:-1]))
+    #input_cv = np.column_stack((input_cv, downside_returns))
+    input_ = input_*scale_factor
+    input_train = input_[:train_idx]
+    nn_fit_vol = jnn_trained.predict(input_train).ravel()/scale_factor
+    input_cv = input_[train_idx:cv_idx]    
+    nn_forecast_vol = jnn_trained.predict(input_cv).ravel()/scale_factor
+else:
+    print('NN was defined')
+# Plot Benchmark against Realized Vol for trained series
+y_train_true = regression_df.loc[regression_df["Dates"].isin(train_dates),
+                                 "Std Dev"].values
+plt.rcParams["figure.figsize"] = (10, 8)
+plt.plot(train_dates, y_train_true, label="Realized Volatilty")
+plt.plot(train_dates, y_train_benchmark, label="GARCH (benchmark)")
+plt.plot(train_dates, nn_fit_vol, label="Latest State of the Art",
+         marker='_', color='moccasin')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=30.)
+plt.title("Realized vs GARCH vs State of the Art (Fitted)")
+plt.savefig("../Results/Fitted_Comparison_Vol.jpg")
+
+# Plot forecast window ahead Benchmark and NN volatility against Realized Vol
+# for cv set
+forecast_dates = dates[train_idx:cv_idx]
+y_cv_true = regression_df.loc[regression_df["Dates"].isin(forecast_dates),
+                              "Std Dev"].values
+plt.clf()
+plt.rcParams["figure.figsize"] = (10, 8)
+plt.plot(forecast_dates, y_cv_true, label = "Realized Volatilty")
+plt.plot(forecast_dates, y_cv_benchmark, label = "GARCH (benchmark)",
+         marker='.')
+plt.plot(forecast_dates, nn_forecast_vol, label = "Latest State of the Art",
+         marker='_', color='moccasin')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=30.)
+plt.title("Realized vs GARCH vs State of the Art")
+plt.savefig("../Results/Forecast_Comparison_Vol.jpg")
+
+# Calculate Benchmark Values on the CV set (against volatility)
+garch_cv_mse = np.mean((y_cv_benchmark - y_cv_true)**2)
+print('The Benchmark MSE on the cv is {:.2e}'.format(garch_cv_mse))
+
+# Calculate NN Values on the CV set (against volatility)
+nn_cv_mse = np.mean((y_cv_true - nn_forecast_vol)**2)
+print('The NN MSE on the cv is {:.2e}'.format(nn_cv_mse))
+
+# Calculate Naive Values on the CV set (against volatility)
+naive_cv_mse = np.mean((y_cv_true - y_cv_naive)**2)
+print('The Naive MSE on the cv is {:.2e}'.format(naive_cv_mse))
+
+# Calculate the forecast df
+forecast_df = pd.DataFrame(y_cv_benchmark, forecast_dates, ['Forecast_Vol'])
+
+# Calculate the realized df
+realized_df = pd.DataFrame(y_cv_true, forecast_dates, ['Forecast_Vol'])
+
+# Calculate the NN forecast df
+nn_forecast_df = pd.DataFrame(nn_forecast_vol, forecast_dates,
+                              ['Forecast_Vol'])
+#%%
+# Backtest the benchmark
+benchmark_df = backtester(forecast_df, options_implied_vol_df,
+                          'GARCH Back Test', look_ahead=7, atm_only=True)
+benchmark_df.to_csv('GARCH Performance.csv')
+#%%
+# Backtest the realized vol
+best_case_df = backtester(realized_df, options_implied_vol_df,
+                          'Realized Back Test', look_ahead=7, atm_only=True,
+                          trade_expiry=True)
+best_case_df.to_csv('Realized Performance.csv')
+#%%
+# Backtest the Neural Net
+nn_df = backtester(nn_forecast_df, options_implied_vol_df,
+                   'Neural Net Back Test', look_ahead=7, atm_only=True)
+nn_df.to_csv('NN Performance.csv')
+# %%
+#Plot all 3 together
+plt.plot(benchmark_df['Cum_PnL'])
+plt.plot(nn_df['Cum_PnL'])
+plt.legend(['GARCH', 'NN'])
+plt.xlabel('Dates')
+plt.ylabel('Cumulative P&L ($)')
+plt.title('Comparison of Trading Strategies')
+plt.grid(True)
+plt.savefig('../Results/Compare_Back_Test.jpg')
+# %%
 #Final Testing
 X_train_cv, y_train_cv = X[:cv_idx], y[:cv_idx]
 ###############################################################################
@@ -253,9 +447,9 @@ train_cv_dates = dates[:cv_idx]
 y_train_cv_true = regression_df.loc[regression_df["Dates"].isin(train_cv_dates),
                                     "Std Dev"].values
 plt.rcParams["figure.figsize"] = (10, 8)
-plt.plot(train_cv_dates, y_train_cv_true, label="Realized Volatilty")
-plt.plot(train_cv_dates, y_train_cv_benchmark, label="GARCH (benchmark)")
-plt.plot(train_cv_dates, nn_fit_vol, label="Latest State of the Art",
+plt.plot(train_dates, y_train_cv_true, label="Realized Volatilty")
+plt.plot(train_dates, y_train_cv_benchmark, label="GARCH (benchmark)")
+plt.plot(train_dates, nn_fit_vol, label="Latest State of the Art",
          marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
@@ -270,10 +464,10 @@ y_test_true = regression_df.loc[regression_df["Dates"].isin(forecast_test_dates)
                                 "Std Dev"].values
 plt.clf()
 plt.rcParams["figure.figsize"] = (10, 8)
-plt.plot(forecast_test_dates, y_test_true, label = "Realized Volatilty")
-plt.plot(forecast_test_dates, y_test_benchmark, label = "GARCH (benchmark)",
+plt.plot(forecast_dates, y_test_true, label = "Realized Volatilty")
+plt.plot(forecast_dates, y_test_benchmark, label = "GARCH (benchmark)",
          marker='.')
-plt.plot(forecast_test_dates, nn_forecast_vol, label = "Latest State of the Art",
+plt.plot(forecast_dates, nn_forecast_vol, label = "Latest State of the Art",
          marker='_', color='moccasin')
 plt.legend()
 plt.grid(True)
@@ -294,54 +488,41 @@ naive_test_mse = np.mean((y_test_true - y_test_naive)**2)
 print('The Naive MSE on the test is {:.2e}'.format(naive_test_mse))
 
 # Calculate the forecast df
-forecast_test_df = pd.DataFrame(y_test_benchmark, forecast_test_dates,
+forecast_test_df = pd.DataFrame(y_cv_benchmark, forecast_dates,
                                 ['Forecast_Vol'])
 
 # Calculate the realized df
-realized_test_df = pd.DataFrame(y_test_true, forecast_test_dates, ['Forecast_Vol'])
+realized_test_df = pd.DataFrame(y_cv_true, forecast_dates, ['Forecast_Vol'])
 
 # Calculate the NN forecast df
-nn_forecast_test_df = pd.DataFrame(nn_forecast_vol, forecast_test_dates,
+nn_forecast_test_df = pd.DataFrame(nn_forecast_vol, forecast_dates,
                                    ['Forecast_Vol'])
-
-# Calculate the naive df
-naive_forecast_test_df = pd.DataFrame(y_test_naive, forecast_test_dates,
-                                      ['Forecast_Vol'])
 #%%
 # Backtest the benchmark
-benchmark_df = backtester(forecast_test_df, options_implied_vol_df,
-                          'GARCH Back Test_Test Set', look_ahead=7,
-                          atm_only=True, trade_expiry=True)
-benchmark_df.to_csv('GARCH Performance_Test Set.csv')
+benchmark_df = backtester(forecast_df, options_implied_vol_df,
+                          'GARCH Back Test', look_ahead=7, atm_only=True)
+benchmark_df.to_csv('GARCH Performance.csv')
 #%%
 # Backtest the realized vol
-best_case_df = backtester(realized_test_df, options_implied_vol_df,
-                          'Realized Back Test_Test Set', look_ahead=7,
-                          atm_only=True, trade_expiry=True)
-best_case_df.to_csv('Realized Performance_Test Set.csv')
+best_case_df = backtester(realized_df, options_implied_vol_df,
+                          'Realized Back Test', look_ahead=7, atm_only=True,
+                          trade_expiry=True)
+best_case_df.to_csv('Realized Performance.csv')
 #%%
 # Backtest the Neural Net
-nn_df = backtester(nn_forecast_test_df, options_implied_vol_df,
-                   'Neural Net Back Test_Test Set', look_ahead=7,
-                   atm_only=True, trade_expiry=True)
-nn_df.to_csv('NN Performance_Test Set.csv')
-# %%
-# Backtest the realized vol
-naive_case_df = backtester(naive_forecast_test_df, options_implied_vol_df,
-                           'Realized Back Test_Test Set', look_ahead=7,
-                           atm_only=True, trade_expiry=True)
-best_case_df.to_csv('Naive Performance_Test Set.csv')
+nn_df = backtester(nn_forecast_df, options_implied_vol_df,
+                   'Neural Net Back Test', look_ahead=7, atm_only=True)
+nn_df.to_csv('NN Performance.csv')
 # %%
 #Plot all 3 together
-plt.plot(naive_case_df['Cum_PnL'])
 plt.plot(benchmark_df['Cum_PnL'])
 plt.plot(nn_df['Cum_PnL'])
-plt.legend(['Naive', 'GARCH', 'NN'])
+plt.legend(['GARCH', 'NN'])
 plt.xlabel('Dates')
 plt.ylabel('Cumulative P&L ($)')
 plt.title('Comparison of Trading Strategies')
 plt.grid(True)
-plt.savefig('../Results/Compare_Back_Test_Test Set.jpg')
+plt.savefig('../Results/Compare_Back_Test.jpg')
 # %%
 ###############################################################################
 ## C. Feature Creation
