@@ -158,9 +158,9 @@ y_test_benchmark = np.sqrt(X_test @ final_garch_params)
 ###############################################################################
 #Forecast using the naive model
 y_test_naive = np.mean(np.sqrt(y_train_cv))
-
+# %%
 ###############################################################################
-# C.3. NN calculations
+# C.3. NN calculations (No Need to run if the model's already trained)
 ###############################################################################
 scale_factor = 1E2
 lag_innov = np.sqrt(X[:, 1])
@@ -232,20 +232,20 @@ get_model_gradients(jnn_trained, jnn_inputs)
 try:
     jnn_trained
 except NameError:
-    filename = "../../Implementation/NN Analysis/Vol_Volume_stock.h5"
+    filename = "model.h5"
     jnn_trained = load_model(filename)
     scale_factor = 1E2
-    input_ = np.sqrt(X[:, 1])
-    input_ = np.column_stack((input_,
-                              regression_df['stocks_change'].values[:-1]))
+    input_ = np.sqrt(X[:, 1])    
     input_ = np.column_stack((input_,
                               regression_df['PX_VOLUME'].values[:-1]))
+    input_ = np.column_stack((input_,
+                              regression_df['stocks_change'].values[:-1]))
     #input_cv = np.column_stack((input_cv, downside_returns))
     input_ = input_*scale_factor
-    input_train = input_[:train_idx]
-    nn_fit_vol = jnn_trained.predict(input_train).ravel()/scale_factor
-    input_cv = input_[train_idx:cv_idx]    
-    nn_forecast_vol = jnn_trained.predict(input_cv).ravel()/scale_factor
+    input_train_cv = input_[:cv_idx]
+    nn_fit_vol = jnn_trained.predict(input_train_cv).ravel()/scale_factor
+    input_test = input_[cv_idx:]    
+    nn_forecast_vol = jnn_trained.predict(input_test).ravel()/scale_factor
 else:
     print('NN was defined')
 # Plot Benchmark against Realized Vol for trained series
@@ -309,27 +309,27 @@ naive_forecast_test_df = pd.DataFrame(y_test_naive, forecast_test_dates,
                                       ['Forecast_Vol'])
 #%%
 # Backtest the benchmark
-benchmark_df = backtester(forecast_test_df, options_implied_vol_df,
-                          'GARCH Back Test_Test Set', look_ahead=7,
-                          atm_only=True, trade_expiry=True)
+benchmark_df, _ = backtester(forecast_test_df, options_implied_vol_df,
+                             'GARCH Back Test_Test Set', look_ahead=7,
+                             atm_only=True, trade_expiry=True)
 benchmark_df.to_csv('GARCH Performance_Test Set.csv')
 #%%
 # Backtest the realized vol
-best_case_df = backtester(realized_test_df, options_implied_vol_df,
-                          'Realized Back Test_Test Set', look_ahead=7,
-                          atm_only=True, trade_expiry=True)
+best_case_df, _ = backtester(realized_test_df, options_implied_vol_df,
+                             'Realized Back Test_Test Set', look_ahead=7,
+                             atm_only=True, trade_expiry=True)
 best_case_df.to_csv('Realized Performance_Test Set.csv')
 #%%
 # Backtest the Neural Net
-nn_df = backtester(nn_forecast_test_df, options_implied_vol_df,
-                   'Neural Net Back Test_Test Set', look_ahead=7,
-                   atm_only=True, trade_expiry=True)
+nn_df, _ = backtester(nn_forecast_test_df, options_implied_vol_df,
+                      'Neural Net Back Test_Test Set', look_ahead=7,
+                      atm_only=True, trade_expiry=True)
 nn_df.to_csv('NN Performance_Test Set.csv')
 # %%
 # Backtest the realized vol
-naive_case_df = backtester(naive_forecast_test_df, options_implied_vol_df,
-                           'Realized Back Test_Test Set', look_ahead=7,
-                           atm_only=True, trade_expiry=True)
+naive_case_df, _ = backtester(naive_forecast_test_df, options_implied_vol_df,
+                              'Realized Back Test_Test Set', look_ahead=7,
+                              atm_only=True, trade_expiry=True)
 best_case_df.to_csv('Naive Performance_Test Set.csv')
 # %%
 #Plot all 3 together

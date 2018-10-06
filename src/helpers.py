@@ -368,7 +368,7 @@ def backtester(model_df, options_implied_vol_df, plot_title, look_ahead=7,
     plt.title(plot_title)
     plt.savefig('../Results/' + plot_title + '.jpg')
     
-    return model_df
+    return model_df, final_cum_pnl
 # %%
 #Feature Engineering
 def feature_normalization(_df, col_names, train_date_end, scale_down=1,
